@@ -1,5 +1,10 @@
 import config
 
+# Use the moving "latest flash" alias rather than a pinned version: pinned
+# models (e.g. gemini-1.5-flash) get retired and then return 404 on
+# generateContent. The alias always points at a currently-served flash model.
+GEMINI_MODEL = "gemini-flash-latest"
+
 FILTER_INSTRUCTIONS = {
     "off": "Do not filter language; reproduce tone faithfully.",
     "clean": "Avoid profanity; mask any strong language with asterisks.",
@@ -31,7 +36,7 @@ def build_prompt(messages, settings):
 def _gemini_backend(prompt):
     import google.generativeai as genai
     genai.configure(api_key=config.GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel(GEMINI_MODEL)
     resp = model.generate_content(prompt)
     return resp.text.strip()
 
