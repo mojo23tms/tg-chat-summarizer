@@ -1,3 +1,4 @@
+import shutil
 import sqlite3
 
 import config
@@ -72,3 +73,23 @@ def set_setting(conn, chat_id, key, value):
         (chat_id, key, value),
     )
     conn.commit()
+
+
+def disk_free_ratio(path):
+    usage = shutil.disk_usage(path)
+    return usage.free / usage.total
+
+
+def enforce_disk_headroom(conn, free_ratio_fn, headroom, batch=200):
+    deleted_total = 0
+    while free_ratio_fn() < headroom:
+        cur = conn.execute(
+            "DELETE FROM messages WHERE id IN ("
+            "SELECT id FROM messages ORDER BY ts ASC, id ASC LIMIT ?)",
+            (batch,),
+        )
+        conn.commit()
+        if cur.rowcount == 0:  # nothing left to delete; avoid infinite loop
+            break
+        deleted_total += cur.rowcount
+    return deleted_total
