@@ -37,8 +37,11 @@ def _gemini_backend(prompt):
 
 
 def _default_backend():
-    # Only gemini is wired now; groq can be added here behind LLM_BACKEND.
-    return _gemini_backend
+    if config.LLM_BACKEND == "gemini":
+        return _gemini_backend
+    raise ValueError(
+        f"Unsupported LLM_BACKEND: {config.LLM_BACKEND!r}. Only 'gemini' is wired."
+    )
 
 
 def summarize(messages, settings, backend_fn=None):

@@ -1,3 +1,4 @@
+import logging
 import time
 
 from telegram import Update
@@ -9,6 +10,8 @@ import config
 import helpers
 import llm
 import storage
+
+logger = logging.getLogger(__name__)
 
 PROFANITY_WORDLIST = {"fuck", "shit", "bitch", "asshole"}  # safety-net only
 
@@ -59,6 +62,7 @@ async def summarize_handler(update, context):
     try:
         summary = llm.summarize(msgs, settings)
     except Exception:
+        logger.exception("summarize failed")
         await update.effective_message.reply_text(
             "Sorry, the summarizer is unavailable right now. Please try again."
         )
