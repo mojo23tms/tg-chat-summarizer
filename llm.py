@@ -1,3 +1,5 @@
+import config
+
 FILTER_INSTRUCTIONS = {
     "off": "Do not filter language; reproduce tone faithfully.",
     "clean": "Avoid profanity; mask any strong language with asterisks.",
@@ -24,3 +26,25 @@ def build_prompt(messages, settings):
         f"{transcript}\n\n"
         "Summary:"
     )
+
+
+def _gemini_backend(prompt):
+    import google.generativeai as genai
+    genai.configure(api_key=config.GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    resp = model.generate_content(prompt)
+    return resp.text.strip()
+
+
+def _default_backend():
+    # Only gemini is wired now; groq can be added here behind LLM_BACKEND.
+    return _gemini_backend
+
+
+def summarize(messages, settings, backend_fn=None):
+    if not messages:
+        return "Nothing to summarize yet."
+    if backend_fn is None:
+        backend_fn = _default_backend()
+    prompt = build_prompt(messages, settings)
+    return backend_fn(prompt)
