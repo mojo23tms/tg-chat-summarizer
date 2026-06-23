@@ -1,5 +1,7 @@
 import sqlite3
 
+import config
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,3 +53,22 @@ def recent_messages(conn, chat_id, n):
     rows = [dict(r) for r in cur.fetchall()]
     rows.reverse()  # chronological oldest -> newest
     return rows
+
+
+def get_settings(conn, chat_id):
+    settings = dict(config.DEFAULTS)
+    cur = conn.execute(
+        "SELECT key, value FROM chat_settings WHERE chat_id = ?", (chat_id,)
+    )
+    for row in cur.fetchall():
+        settings[row["key"]] = row["value"]
+    return settings
+
+
+def set_setting(conn, chat_id, key, value):
+    conn.execute(
+        "INSERT INTO chat_settings (chat_id, key, value) VALUES (?, ?, ?) "
+        "ON CONFLICT(chat_id, key) DO UPDATE SET value = excluded.value",
+        (chat_id, key, value),
+    )
+    conn.commit()
