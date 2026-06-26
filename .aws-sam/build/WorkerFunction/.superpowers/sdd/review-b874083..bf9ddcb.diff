@@ -1,0 +1,159 @@
+# Review package: b874083..HEAD
+
+## Commits
+bf9ddcb fix: log LLM errors, fail-fast on missing secrets, honor LLM_BACKEND
+
+## Files changed
+ handlers.py                 |  4 ++++
+ llm.py                      |  7 +++++--
+ main.py                     |  4 ++++
+ tests/test_llm_summarize.py | 11 +++++++++++
+ 4 files changed, 24 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/handlers.py b/handlers.py
+index e4324ed..869fdf4 100644
+--- a/handlers.py
++++ b/handlers.py
+@@ -1,22 +1,25 @@
++import logging
+ import time
+ 
+ from telegram import Update
+ from telegram.constants import ParseMode
+ from telegram.ext import (Application, CommandHandler, ContextTypes,
+                           MessageHandler, filters)
+ 
+ import config
+ import helpers
+ import llm
+ import storage
+ 
++logger = logging.getLogger(__name__)
++
+ PROFANITY_WORDLIST = {"fuck", "shit", "bitch", "asshole"}  # safety-net only
+ 
+ ADMIN_STATUSES = {"administrator", "creator"}
+ VALID_FILTERS = {"off", "clean", "strict"}
+ 
+ 
+ def is_setting_change_allowed(member_status):
+     return member_status in ADMIN_STATUSES
+ 
+ 
+@@ -52,20 +55,21 @@ async def summarize_handler(update, context):
+     if not msgs:
+         await update.effective_message.reply_text(
+             "I have no logged messages yet — I can only summarize messages "
+             "sent after I joined this chat."
+         )
+         return
+     settings = storage.get_settings(conn, chat_id)
+     try:
+         summary = llm.summarize(msgs, settings)
+     except Exception:
++        logger.exception("summarize failed")
+         await update.effective_message.reply_text(
+             "Sorry, the summarizer is unavailable right now. Please try again."
+         )
+         return
+     summary = helpers.scrub(summary, settings["filter_level"], PROFANITY_WORDLIST)
+     user = update.effective_user
+     mention = helpers.format_mention(user.id, user.full_name or "you")
+     await update.effective_message.reply_text(
+         f"{mention}, here is your summary of the last {len(msgs)} messages:\n\n{summary}",
+         parse_mode=ParseMode.HTML,
+diff --git a/llm.py b/llm.py
+index d734cf0..a6afbce 100644
+--- a/llm.py
++++ b/llm.py
+@@ -30,21 +30,24 @@ def build_prompt(messages, settings):
+ 
+ def _gemini_backend(prompt):
+     import google.generativeai as genai
+     genai.configure(api_key=config.GEMINI_API_KEY)
+     model = genai.GenerativeModel("gemini-1.5-flash")
+     resp = model.generate_content(prompt)
+     return resp.text.strip()
+ 
+ 
+ def _default_backend():
+-    # Only gemini is wired now; groq can be added here behind LLM_BACKEND.
+-    return _gemini_backend
++    if config.LLM_BACKEND == "gemini":
++        return _gemini_backend
++    raise ValueError(
++        f"Unsupported LLM_BACKEND: {config.LLM_BACKEND!r}. Only 'gemini' is wired."
++    )
+ 
+ 
+ def summarize(messages, settings, backend_fn=None):
+     if not messages:
+         return "Nothing to summarize yet."
+     if backend_fn is None:
+         backend_fn = _default_backend()
+     prompt = build_prompt(messages, settings)
+     return backend_fn(prompt)
+diff --git a/main.py b/main.py
+index 9fd84e4..a6f979d 100644
+--- a/main.py
++++ b/main.py
+@@ -1,17 +1,21 @@
+ import os
+ 
+ import config
+ import handlers
+ import storage
+ 
+ 
+ def main():
++    if not config.TELEGRAM_TOKEN:
++        raise SystemExit("TELEGRAM_TOKEN is required (set it as an environment variable).")
++    if not config.GEMINI_API_KEY:
++        raise SystemExit("GEMINI_API_KEY is required (set it as an environment variable).")
+     data_dir = os.path.dirname(config.DB_PATH) or "."
+     os.makedirs(data_dir, exist_ok=True)
+     conn = storage.connect(config.DB_PATH)
+     app = handlers.build_application(conn, data_dir)
+     app.run_polling()
+ 
+ 
+ if __name__ == "__main__":
+     main()
+diff --git a/tests/test_llm_summarize.py b/tests/test_llm_summarize.py
+index d9a53eb..96e698e 100644
+--- a/tests/test_llm_summarize.py
++++ b/tests/test_llm_summarize.py
+@@ -1,10 +1,12 @@
++import pytest
++
+ import llm
+ 
+ 
+ def test_summarize_uses_injected_backend():
+     msgs = [{"user_name": "a", "text": "hello world"}]
+     settings = {"style": "s", "filter_level": "off", "language": "auto"}
+     captured = {}
+ 
+     def fake_backend(prompt):
+         captured["prompt"] = prompt
+@@ -19,10 +21,19 @@ def test_summarize_empty_messages_short_circuits():
+     called = {"n": 0}
+ 
+     def fake_backend(prompt):
+         called["n"] += 1
+         return "x"
+ 
+     out = llm.summarize([], {"style": "s", "filter_level": "off", "language": "auto"},
+                         backend_fn=fake_backend)
+     assert out == "Nothing to summarize yet."
+     assert called["n"] == 0
++
++
++def test_default_backend_honors_llm_backend(monkeypatch):
++    import config
++    monkeypatch.setattr(config, "LLM_BACKEND", "gemini")
++    assert llm._default_backend() is llm._gemini_backend
++    monkeypatch.setattr(config, "LLM_BACKEND", "groq")
++    with pytest.raises(ValueError):
++        llm._default_backend()

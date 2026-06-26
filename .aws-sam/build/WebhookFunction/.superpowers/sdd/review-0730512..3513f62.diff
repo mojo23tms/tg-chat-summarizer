@@ -1,0 +1,76 @@
+# Review package: 0730512..HEAD
+
+## Commits
+3513f62 chore: scaffold project and config
+
+## Files changed
+ .gitignore           |  5 +++++
+ config.py            | 17 +++++++++++++++++
+ data/.gitkeep        |  0
+ requirements.txt     |  3 +++
+ tests/test_config.py | 10 ++++++++++
+ 5 files changed, 35 insertions(+)
+
+## Diff
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..28ba362
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,5 @@
++__pycache__/
++*.pyc
++.venv/
++data/*.db
++.env
+diff --git a/config.py b/config.py
+new file mode 100644
+index 0000000..30363ed
+--- /dev/null
++++ b/config.py
+@@ -0,0 +1,17 @@
++import os
++
++DB_PATH = os.environ.get("DB_PATH", "data/bot.db")
++TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
++LLM_BACKEND = os.environ.get("LLM_BACKEND", "gemini")
++GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
++GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
++
++DEFAULT_COUNT = 30
++MAX_COUNT = 200
++DISK_HEADROOM = 0.10  # keep at least 10% of the volume free
++
++DEFAULTS = {
++    "style": "concise, neutral bullet points",
++    "filter_level": "clean",
++    "language": "auto",
++}
+diff --git a/data/.gitkeep b/data/.gitkeep
+new file mode 100644
+index 0000000..e69de29
+diff --git a/requirements.txt b/requirements.txt
+new file mode 100644
+index 0000000..d3d8cda
+--- /dev/null
++++ b/requirements.txt
+@@ -0,0 +1,3 @@
++python-telegram-bot==21.6
++google-generativeai==0.8.3
++pytest==8.3.3
+diff --git a/tests/test_config.py b/tests/test_config.py
+new file mode 100644
+index 0000000..7bcc224
+--- /dev/null
++++ b/tests/test_config.py
+@@ -0,0 +1,10 @@
++import config
++
++
++def test_defaults_present():
++    assert config.DEFAULT_COUNT == 30
++    assert config.MAX_COUNT == 200
++    assert config.DISK_HEADROOM == 0.10
++    assert set(config.DEFAULTS) == {"style", "filter_level", "language"}
++    assert config.DEFAULTS["filter_level"] == "clean"
++    assert config.DEFAULTS["language"] == "auto"

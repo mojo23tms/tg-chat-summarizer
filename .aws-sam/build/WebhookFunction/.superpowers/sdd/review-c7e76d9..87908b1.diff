@@ -1,0 +1,95 @@
+# Review package: c7e76d9..HEAD
+
+## Commits
+87908b1 feat: summarize() with injectable swappable backend
+
+## Files changed
+ llm.py                      | 24 ++++++++++++++++++++++++
+ tests/test_llm_summarize.py | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 52 insertions(+)
+
+## Diff
+diff --git a/llm.py b/llm.py
+index e45e0cc..d734cf0 100644
+--- a/llm.py
++++ b/llm.py
+@@ -1,10 +1,12 @@
++import config
++
+ FILTER_INSTRUCTIONS = {
+     "off": "Do not filter language; reproduce tone faithfully.",
+     "clean": "Avoid profanity; mask any strong language with asterisks.",
+     "strict": "Use no profanity, slurs, or harassing language whatsoever; "
+               "rephrase such content neutrally.",
+ }
+ 
+ 
+ def _language_instruction(language):
+     if language == "auto":
+@@ -17,10 +19,32 @@ def build_prompt(messages, settings):
+     transcript = "\n".join(f"{m['user_name']}: {m['text']}" for m in messages)
+     return (
+         "You are a chat summarizer. Summarize the conversation below.\n"
+         f"Style: {settings['style']}.\n"
+         f"{_language_instruction(settings.get('language', 'auto'))}\n"
+         f"{FILTER_INSTRUCTIONS.get(filter_level, FILTER_INSTRUCTIONS['clean'])}\n\n"
+         "Conversation:\n"
+         f"{transcript}\n\n"
+         "Summary:"
+     )
++
++
++def _gemini_backend(prompt):
++    import google.generativeai as genai
++    genai.configure(api_key=config.GEMINI_API_KEY)
++    model = genai.GenerativeModel("gemini-1.5-flash")
++    resp = model.generate_content(prompt)
++    return resp.text.strip()
++
++
++def _default_backend():
++    # Only gemini is wired now; groq can be added here behind LLM_BACKEND.
++    return _gemini_backend
++
++
++def summarize(messages, settings, backend_fn=None):
++    if not messages:
++        return "Nothing to summarize yet."
++    if backend_fn is None:
++        backend_fn = _default_backend()
++    prompt = build_prompt(messages, settings)
++    return backend_fn(prompt)
+diff --git a/tests/test_llm_summarize.py b/tests/test_llm_summarize.py
+new file mode 100644
+index 0000000..d9a53eb
+--- /dev/null
++++ b/tests/test_llm_summarize.py
+@@ -0,0 +1,28 @@
++import llm
++
++
++def test_summarize_uses_injected_backend():
++    msgs = [{"user_name": "a", "text": "hello world"}]
++    settings = {"style": "s", "filter_level": "off", "language": "auto"}
++    captured = {}
++
++    def fake_backend(prompt):
++        captured["prompt"] = prompt
++        return "SUMMARY TEXT"
++
++    out = llm.summarize(msgs, settings, backend_fn=fake_backend)
++    assert out == "SUMMARY TEXT"
++    assert "hello world" in captured["prompt"]
++
++
++def test_summarize_empty_messages_short_circuits():
++    called = {"n": 0}
++
++    def fake_backend(prompt):
++        called["n"] += 1
++        return "x"
++
++    out = llm.summarize([], {"style": "s", "filter_level": "off", "language": "auto"},
++                        backend_fn=fake_backend)
++    assert out == "Nothing to summarize yet."
++    assert called["n"] == 0

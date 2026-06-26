@@ -1,0 +1,72 @@
+# Review package: 87908b1..HEAD
+
+## Commits
+329a227 feat: handler helpers (count, mention, profanity scrub)
+
+## Files changed
+ helpers.py            | 27 +++++++++++++++++++++++++++
+ tests/test_helpers.py | 22 ++++++++++++++++++++++
+ 2 files changed, 49 insertions(+)
+
+## Diff
+diff --git a/helpers.py b/helpers.py
+new file mode 100644
+index 0000000..ce78f1a
+--- /dev/null
++++ b/helpers.py
+@@ -0,0 +1,27 @@
++import html
++import re
++
++import config
++
++
++def parse_count(arg):
++    try:
++        n = int(arg)
++    except (TypeError, ValueError):
++        return config.DEFAULT_COUNT
++    return max(1, min(n, config.MAX_COUNT))
++
++
++def format_mention(user_id, name):
++    return f'<a href="tg://user?id={user_id}">{html.escape(name)}</a>'
++
++
++def scrub(text, filter_level, wordlist):
++    if filter_level == "off" or not wordlist:
++        return text
++
++    def mask(match):
++        return "*" * len(match.group(0))
++
++    pattern = r"\b(" + "|".join(re.escape(w) for w in wordlist) + r")\b"
++    return re.sub(pattern, mask, text, flags=re.IGNORECASE)
+diff --git a/tests/test_helpers.py b/tests/test_helpers.py
+new file mode 100644
+index 0000000..8e32398
+--- /dev/null
++++ b/tests/test_helpers.py
+@@ -0,0 +1,22 @@
++import config
++import helpers
++
++
++def test_parse_count_default_and_clamp():
++    assert helpers.parse_count(None) == config.DEFAULT_COUNT
++    assert helpers.parse_count("abc") == config.DEFAULT_COUNT
++    assert helpers.parse_count("0") == 1
++    assert helpers.parse_count("5") == 5
++    assert helpers.parse_count(str(config.MAX_COUNT + 50)) == config.MAX_COUNT
++
++
++def test_format_mention_escapes_html():
++    out = helpers.format_mention(42, "A&B <x>")
++    assert out == '<a href="tg://user?id=42">A&amp;B &lt;x&gt;</a>'
++
++
++def test_scrub_masks_only_when_filtering():
++    wl = {"darn"}
++    assert helpers.scrub("oh darn", "off", wl) == "oh darn"
++    assert helpers.scrub("oh DARN it", "clean", wl) == "oh **** it"
++    assert helpers.scrub("darning socks", "strict", wl) == "darning socks"  # whole word only
