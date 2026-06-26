@@ -103,3 +103,16 @@ def test_set_webhook_uses_injected_opener_without_network():
     body = request.data.decode("utf-8")
     assert "url=https%3A%2F%2Fexample.test%2Ftelegram" in body
     assert "secret_token=secret" in body
+
+
+def test_set_webhook_raises_typed_error_on_http_failure():
+    opener = FailingOpener(
+        404,
+        {"ok": False, "error_code": 404, "description": "Not Found"},
+    )
+
+    with pytest.raises(TelegramApiError) as exc_info:
+        set_webhook("bad-token", "https://example.test/telegram", "secret", opener)
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.payload["description"] == "Not Found"

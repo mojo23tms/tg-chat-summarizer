@@ -63,8 +63,20 @@ def set_webhook(token, webhook_url, secret_token, opener=None):
         {"url": webhook_url, "secret_token": secret_token}
     ).encode("utf-8")
     request = urllib.request.Request(api_url, data=payload, method="POST")
-    with opener(request, timeout=10) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with opener(request, timeout=10) as response:
+            parsed = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        payload = _parse_json_body(body)
+        raise TelegramApiError(
+            f"Telegram setWebhook failed with HTTP {exc.code}: {payload or body}",
+            status_code=exc.code,
+            payload=payload,
+        ) from exc
+    if not parsed.get("ok"):
+        raise TelegramApiError(f"Telegram setWebhook failed: {parsed}", payload=parsed)
+    return parsed
 
 
 def _parse_json_body(body):

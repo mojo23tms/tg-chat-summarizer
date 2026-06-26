@@ -234,6 +234,8 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam logs \
   JSON export plus `scripts/import_telegram_export.py`.
 - DynamoDB TTL is eventual. `MESSAGE_TTL_DAYS=365` controls expiration metadata,
   not exact deletion time.
+- The bot maintains a lightweight DynamoDB `CHATS` index for owner chat
+  discovery. Imported history also updates this index.
 - Tests intentionally block external network calls to protect Telegram, Gemini,
   AWS, and free-tier quota.
 

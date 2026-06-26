@@ -1,5 +1,14 @@
-.venv/
-__pycache__/
-data/*.db
+.aws-sam/
 .git/
+.pytest_cache/
+.venv/
+.venv.*/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+data/*.db
+data/*.sqlite*
 tests/
+docs/
+package-lock.json

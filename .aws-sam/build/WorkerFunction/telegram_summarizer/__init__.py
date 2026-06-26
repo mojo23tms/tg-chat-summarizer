@@ -1,1 +1,0 @@
-"""Telegram summarizer bot package."""

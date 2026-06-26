@@ -57,6 +57,23 @@ def test_valid_update_enqueues_fifo_message_and_returns_ok(monkeypatch):
     ]
 
 
+def test_valid_update_without_queue_url_returns_bad_request(monkeypatch):
+    monkeypatch.setattr(aws_webhook.config, "TELEGRAM_WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(aws_webhook.config, "QUEUE_URL", "")
+    monkeypatch.delenv("QUEUE_URL", raising=False)
+
+    response = aws_webhook.lambda_handler(
+        {
+            "headers": {"x-telegram-bot-api-secret-token": "secret"},
+            "body": json.dumps({"update_id": 123}),
+        },
+        None,
+        sqs_client=FakeSqs(),
+    )
+
+    assert response["statusCode"] == 400
+
+
 def test_webhook_does_not_call_telegram_or_gemini(monkeypatch):
     monkeypatch.setattr(aws_webhook.config, "TELEGRAM_WEBHOOK_SECRET", "secret")
     monkeypatch.setattr(aws_webhook.config, "QUEUE_URL", "queue-url")

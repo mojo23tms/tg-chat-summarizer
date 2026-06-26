@@ -12,13 +12,12 @@ class FakeTable:
 
     def query(self, **kwargs):
         pk = kwargs["ExpressionAttributeValues"][":pk"]
-        prefix = kwargs["ExpressionAttributeValues"][":prefix"]
+        prefix = kwargs["ExpressionAttributeValues"].get(":prefix")
         limit = kwargs.get("Limit")
-        items = [
-            item for item in self.items
-            if item["pk"] == pk and item["sk"].startswith(prefix)
-        ]
-        items.sort(key=lambda item: item["sk"], reverse=not kwargs["ScanIndexForward"])
+        items = [item for item in self.items if item["pk"] == pk]
+        if prefix is not None:
+            items = [item for item in items if item["sk"].startswith(prefix)]
+        items.sort(key=lambda item: item["sk"], reverse=not kwargs.get("ScanIndexForward", True))
         return {"Items": items[:limit] if limit else items}
 
     def scan(self, **kwargs):
@@ -62,6 +61,8 @@ def test_message_writes_are_scoped_by_chat_and_include_ttl():
     assert table.items[0]["pk"] == "CHAT#1"
     assert table.items[0]["sk"] == "MSG#00000000000000000100#00000000000000000005"
     assert table.items[0]["expires_at"] == 100 + 2 * 86400
+    assert table.items[1]["pk"] == "CHATS"
+    assert table.items[1]["sk"] == "CHAT#1"
 
 
 def test_message_write_can_override_expiration_for_imports():
@@ -112,6 +113,17 @@ def test_list_chat_ids_returns_distinct_chat_partitions():
     assert storage.list_chat_ids() == [1, 2]
 
 
+def test_list_chat_ids_falls_back_to_scan_for_legacy_tables():
+    table = FakeTable()
+    table.items = [
+        {"pk": "CHAT#2", "sk": "MSG#00000000000000000001#00000000000000000001"},
+        {"pk": "CHAT#1", "sk": "MSG#00000000000000000001#00000000000000000001"},
+    ]
+    storage, _table = adapter(table=table)
+
+    assert storage.list_chat_ids() == [1, 2]
+
+
 def test_usage_totals_sum_records_after_since():
     storage, _table = adapter()
     storage.log_usage(
@@ -144,3 +156,26 @@ def test_usage_totals_sum_records_after_since():
     assert totals["requests"] == 1
     assert totals["messages_count"] == 4
     assert totals["total_tokens"] == 27
+
+
+def test_usage_records_do_not_collide_with_same_second(monkeypatch):
+    values = iter([111, 222])
+    monkeypatch.setattr(
+        "telegram_summarizer.dynamodb_storage.time.time_ns",
+        lambda: next(values),
+    )
+    storage, table = adapter()
+    usage = {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "total_tokens": 15,
+        "estimated": True,
+        "model": "m",
+    }
+
+    storage.log_usage(1, usage, messages_count=3, ts=100)
+    storage.log_usage(1, usage, messages_count=3, ts=100)
+
+    usage_keys = [item["sk"] for item in table.items if item["sk"].startswith("USAGE#")]
+    assert len(usage_keys) == 2
+    assert len(set(usage_keys)) == 2

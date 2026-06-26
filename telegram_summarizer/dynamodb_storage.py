@@ -11,6 +11,14 @@ def _owner_pk(user_id):
     return f"OWNER#{user_id}"
 
 
+def _chat_index_pk():
+    return "CHATS"
+
+
+def _chat_index_sk(chat_id):
+    return f"CHAT#{chat_id}"
+
+
 def _message_sk(ts, msg_id):
     return f"MSG#{int(ts):020d}#{int(msg_id):020d}"
 
@@ -39,8 +47,29 @@ class DynamoDBStorage:
             "expires_at": int(expires_at or ts + self.ttl_days * 86400),
         }
         self.table.put_item(Item=item)
+        self.table.put_item(
+            Item={
+                "pk": _chat_index_pk(),
+                "sk": _chat_index_sk(chat_id),
+                "chat_id": int(chat_id),
+                "last_seen_at": ts,
+            }
+        )
 
     def list_chat_ids(self):
+        indexed = self._list_indexed_chat_ids()
+        if indexed:
+            return indexed
+        return self._scan_chat_ids()
+
+    def _list_indexed_chat_ids(self):
+        response = self.table.query(
+            KeyConditionExpression="pk = :pk",
+            ExpressionAttributeValues={":pk": _chat_index_pk()},
+        )
+        return sorted({int(item["chat_id"]) for item in response.get("Items", [])})
+
+    def _scan_chat_ids(self):
         seen = set()
         kwargs = {"ProjectionExpression": "pk"}
         while True:
@@ -96,6 +125,13 @@ class DynamoDBStorage:
     def set_owner_active_chat(self, user_id, chat_id):
         self.table.put_item(
             Item={
+                "pk": _chat_index_pk(),
+                "sk": _chat_index_sk(chat_id),
+                "chat_id": int(chat_id),
+            }
+        )
+        self.table.put_item(
+            Item={
                 "pk": _owner_pk(user_id),
                 "sk": "ACTIVE_CHAT",
                 "chat_id": int(chat_id),
@@ -108,7 +144,7 @@ class DynamoDBStorage:
         ts = int(time.time() if ts is None else ts)
         item = {
             "pk": _chat_pk(chat_id),
-            "sk": f"USAGE#{ts:020d}",
+            "sk": f"USAGE#{ts:020d}#{time.time_ns() % 1_000_000_000:09d}",
             "messages_count": int(messages_count),
             "input_tokens": int(usage.get("input_tokens", 0)),
             "output_tokens": int(usage.get("output_tokens", 0)),
@@ -138,7 +174,7 @@ class DynamoDBStorage:
         while True:
             response = self.table.query(**kwargs)
             for item in response.get("Items", []):
-                ts = int(item["sk"].removeprefix("USAGE#"))
+                ts = int(item["sk"].removeprefix("USAGE#").split("#", 1)[0])
                 if since_ts is not None and ts < int(since_ts):
                     continue
                 totals["requests"] += 1

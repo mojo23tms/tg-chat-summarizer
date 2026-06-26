@@ -123,7 +123,7 @@ def select_messages_for_token_budget(
     return selected or [messages[-1]]
 
 
-def _estimated_usage(prompt, text):
+def estimate_usage(prompt, text):
     input_tokens = estimate_tokens(prompt)
     output_tokens = estimate_tokens(text)
     return {
@@ -135,6 +135,9 @@ def _estimated_usage(prompt, text):
     }
 
 
+_estimated_usage = estimate_usage
+
+
 def summarize_with_usage(messages, settings, backend_fn=None):
     if not messages:
         return {"text": "Nothing to summarize yet.", "usage": None}
@@ -144,10 +147,10 @@ def summarize_with_usage(messages, settings, backend_fn=None):
     result = backend_fn(prompt)
     if isinstance(result, dict):
         text = result["text"]
-        usage = result.get("usage") or _estimated_usage(prompt, text)
+        usage = result.get("usage") or estimate_usage(prompt, text)
     else:
         text = result
-        usage = _estimated_usage(prompt, text)
+        usage = estimate_usage(prompt, text)
     return {"text": text, "usage": usage}
 
 

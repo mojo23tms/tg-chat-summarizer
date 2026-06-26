@@ -143,6 +143,14 @@ def test_dynamodb_item_matches_live_storage_keys():
     assert item["expires_at"] == {"N": "1741536002"}
 
 
+def test_dynamodb_chat_index_item_matches_storage_index():
+    assert importer.dynamodb_chat_index_item(-1001) == {
+        "pk": {"S": "CHATS"},
+        "sk": {"S": "CHAT#-1001"},
+        "chat_id": {"N": "-1001"},
+    }
+
+
 def test_import_messages_with_aws_cli_batches_without_network(monkeypatch):
     calls = []
 
@@ -175,6 +183,32 @@ def test_import_messages_with_aws_cli_batches_without_network(monkeypatch):
         progress_every=0,
     )
 
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0][:3] == ["aws", "dynamodb", "batch-write-item"]
     assert "--region" in calls[0]
+
+
+def test_aws_cli_batch_write_retries_unprocessed_items(monkeypatch):
+    calls = []
+
+    def fake_run(command, check, capture_output, text):
+        calls.append(command)
+
+        class Result:
+            returncode = 0
+            stderr = ""
+
+            @property
+            def stdout(self):
+                if len(calls) == 1:
+                    return json.dumps({"UnprocessedItems": {"table": []}})
+                return "{}"
+
+        return Result()
+
+    monkeypatch.setattr(importer.subprocess, "run", fake_run)
+    monkeypatch.setattr(importer.time, "sleep", lambda seconds: None)
+
+    importer._batch_write_with_retry({"table": []}, "eu-central-1")
+
+    assert len(calls) == 2

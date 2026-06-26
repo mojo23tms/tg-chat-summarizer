@@ -126,29 +126,29 @@ def dynamodb_item(chat_id, message, expires_at):
     }
 
 
+def dynamodb_chat_index_item(chat_id):
+    return {
+        "pk": {"S": "CHATS"},
+        "sk": {"S": _chat_pk(chat_id)},
+        "chat_id": {"N": str(int(chat_id))},
+    }
+
+
 def _chunks(items, size):
     for index in range(0, len(items), size):
         yield items[index:index + size]
 
 
-def import_messages_with_aws_cli(
-    messages, chat_id, table_name, region, expires_at, progress_every=500
-):
-    imported = 0
-    for batch in _chunks(messages, 25):
-        request = {
-            table_name: [
-                {"PutRequest": {"Item": dynamodb_item(chat_id, message, expires_at)}}
-                for message in batch
-            ]
-        }
+def _batch_write_with_retry(request_items, region, max_attempts=5):
+    pending = request_items
+    for attempt in range(max_attempts):
         result = subprocess.run(
             [
                 "aws",
                 "dynamodb",
                 "batch-write-item",
                 "--request-items",
-                json.dumps(request),
+                json.dumps(pending),
                 "--region",
                 region,
             ],
@@ -160,11 +160,29 @@ def import_messages_with_aws_cli(
             detail = (result.stderr or result.stdout).strip()
             raise SystemExit(f"aws dynamodb batch-write-item failed:\n{detail}")
         response = json.loads(result.stdout or "{}")
-        unprocessed = response.get("UnprocessedItems") or {}
-        if unprocessed:
-            raise SystemExit(
-                "DynamoDB returned unprocessed items. Retry the import with a lower limit."
-            )
+        pending = response.get("UnprocessedItems") or {}
+        if not pending:
+            return
+        time.sleep(min(2 ** attempt, 10))
+    raise SystemExit("DynamoDB returned unprocessed items after repeated retries.")
+
+
+def import_messages_with_aws_cli(
+    messages, chat_id, table_name, region, expires_at, progress_every=500
+):
+    imported = 0
+    _batch_write_with_retry(
+        {table_name: [{"PutRequest": {"Item": dynamodb_chat_index_item(chat_id)}}]},
+        region,
+    )
+    for batch in _chunks(messages, 25):
+        request = {
+            table_name: [
+                {"PutRequest": {"Item": dynamodb_item(chat_id, message, expires_at)}}
+                for message in batch
+            ]
+        }
+        _batch_write_with_retry(request, region)
         imported += len(batch)
         if progress_every and imported % progress_every == 0:
             print(f"imported {imported} messages", file=sys.stderr)

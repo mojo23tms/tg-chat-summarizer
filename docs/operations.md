@@ -222,12 +222,13 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws dynamodb query \
   --region eu-central-1
 ```
 
-List known chat partitions:
+List known chat ids from the maintained chat index:
 
 ```bash
-DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws dynamodb scan \
+DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws dynamodb query \
   --table-name "$DDB_TABLE_NAME" \
-  --projection-expression "pk" \
+  --key-condition-expression 'pk = :pk' \
+  --expression-attribute-values '{":pk":{"S":"CHATS"}}' \
   --region eu-central-1
 ```
 

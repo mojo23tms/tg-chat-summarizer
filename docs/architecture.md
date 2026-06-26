@@ -24,7 +24,7 @@ WorkerFunction: telegram_summarizer.aws_worker.lambda_handler
   stores usage records
   sends Telegram Bot API replies
 DynamoDB
-  stores messages, settings, owner state, usage
+  stores messages, chat index, settings, owner state, usage
 ```
 
 The webhook Lambda returns quickly so Telegram does not retry while Gemini is
@@ -109,6 +109,24 @@ expires_at
 
 `expires_at` is used by DynamoDB TTL. The default retention is 365 days.
 
+Every live message write also upserts a lightweight chat index item:
+
+```text
+pk = CHATS
+sk = CHAT#{chat_id}
+```
+
+Attributes:
+
+```text
+chat_id
+last_seen_at
+```
+
+Owner DM commands use this index for `/chats`. If the index is empty, the
+storage adapter can still scan old `CHAT#...` partitions as a compatibility
+fallback.
+
 ### Settings
 
 ```text
@@ -140,12 +158,14 @@ chat_id
 ```
 
 Used so a bot owner can DM the bot and change settings for a selected group.
+Selecting a chat with `/usechat` also upserts the `CHATS` index entry, so owner
+controls can work even before the next live message arrives.
 
 ### Usage Records
 
 ```text
 pk = CHAT#{chat_id}
-sk = USAGE#{timestamp_padded}
+sk = USAGE#{timestamp_padded}#{nanosecond_suffix}
 ```
 
 Attributes:
@@ -160,6 +180,8 @@ model
 ```
 
 Gemini usage metadata is used when available. Otherwise usage is estimated.
+The suffix prevents multiple summaries in the same second from overwriting each
+other.
 
 ## Command Routing
 

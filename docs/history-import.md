@@ -19,18 +19,19 @@ the export option is missing.
 
 Send `/whoami` in the target chat. Use the returned `chat_id`.
 
-You can also inspect DynamoDB partitions:
+You can also inspect the DynamoDB chat index:
 
 ```bash
 export DDB_TABLE_NAME="telegram-summarizer-bot-BotTable-..."
 
-DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws dynamodb scan \
+DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws dynamodb query \
   --table-name "$DDB_TABLE_NAME" \
-  --projection-expression "pk" \
+  --key-condition-expression 'pk = :pk' \
+  --expression-attribute-values '{":pk":{"S":"CHATS"}}' \
   --region eu-central-1
 ```
 
-Use the number after `CHAT#`, for example:
+Use the `chat_id` value, or the number after `CHAT#` in `sk`, for example:
 
 ```text
 CHAT#-1002200584149 -> -1002200584149
@@ -115,6 +116,7 @@ The importer:
 - skips empty/media-only messages
 - preserves original message timestamps for ordering
 - stores text in the same DynamoDB schema used by live messages
+- upserts the `CHATS` index used by `/chats`
 - sets TTL from import time, so old exported messages do not expire immediately
 
 ## Verify Import
@@ -138,7 +140,8 @@ Then test in Telegram:
 
 ## Cost And Quota Notes
 
-- DynamoDB batch write limit is 25 items per request; the script batches for you.
+- DynamoDB batch write limit is 25 items per request; the script batches for you
+  and retries unprocessed items with backoff.
 - Rewriting already-imported items wastes writes but does not duplicate records.
 - `/summarize` still only sends selected recent messages to Gemini.
 - Importing more history increases DynamoDB storage, not per-summary LLM usage.

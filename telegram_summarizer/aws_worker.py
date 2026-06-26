@@ -95,7 +95,7 @@ def _summary_result(messages, settings, summarize_fn):
     if isinstance(result, dict):
         return result
     prompt = llm.build_prompt(messages, settings)
-    return {"text": result, "usage": llm._estimated_usage(prompt, result)}
+    return {"text": result, "usage": llm.estimate_usage(prompt, result)}
 
 
 def _handle_summarize(storage, telegram, message, args, summarize_fn, now_fn):

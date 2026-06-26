@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 
 def _headers(event):
@@ -37,15 +40,20 @@ def lambda_handler(event, context, sqs_client=None):
     expected_secret = config.TELEGRAM_WEBHOOK_SECRET
     actual_secret = _headers(event).get("x-telegram-bot-api-secret-token")
     if not expected_secret or actual_secret != expected_secret:
+        logger.warning("telegram webhook rejected: invalid secret")
         return _response(401, {"ok": False})
 
     try:
         update = json.loads(event.get("body") or "{}")
+        queue_url = os.environ.get("QUEUE_URL") or config.QUEUE_URL
+        if not queue_url:
+            raise ValueError("QUEUE_URL is required")
         if sqs_client is None:
             import boto3
 
             sqs_client = boto3.client("sqs")
-        enqueue_update(update, os.environ.get("QUEUE_URL", config.QUEUE_URL), sqs_client)
+        enqueue_update(update, queue_url, sqs_client)
     except Exception:
+        logger.exception("telegram webhook failed")
         return _response(400, {"ok": False})
     return _response(200, {"ok": True})

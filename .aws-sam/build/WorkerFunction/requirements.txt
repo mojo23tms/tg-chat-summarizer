@@ -1,4 +1,0 @@
-python-telegram-bot==21.6
-google-generativeai==0.8.3
-boto3==1.35.99
-pytest==8.3.3
