@@ -298,6 +298,11 @@ def _send_no_history(telegram, chat_id):
     )
 
 
+def _send_ai_html_response(telegram, chat_id, text):
+    for chunk in helpers.split_telegram_html(text):
+        telegram.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+
+
 def _is_admin(telegram, message, user_id):
     if _chat_type(message) == "private":
         return True
@@ -376,7 +381,7 @@ def _handle_summarize(storage, telegram, message, args, summarize_fn, now_fn):
         return
     storage.log_usage(chat_id, result.get("usage"), len(msgs), ts=int(now_fn()))
     summary = helpers.scrub(summary, settings["filter_level"], PROFANITY_WORDLIST)
-    summary = helpers.render_summary_html(summary)
+    summary = helpers.render_telegram_html(summary)
     user = _user(message)
     mention = helpers.format_mention(user.get("id"), _user_name(user) or "you")
     if reduced_after_block:
@@ -385,11 +390,11 @@ def _handle_summarize(storage, telegram, message, args, summarize_fn, now_fn):
         source = "based on context budget"
     else:
         source = "requested"
-    telegram.send_message(
+    _send_ai_html_response(
+        telegram,
         chat_id,
         f"{mention}, here is your summary of the last {len(msgs)} messages "
         f"({source}):\n\n{summary}",
-        parse_mode=ParseMode.HTML,
     )
 
 

@@ -40,3 +40,29 @@ def test_summary_reply_escapes_llm_text_for_html_parse_mode(monkeypatch):
             "parse_mode": ParseMode.HTML,
         }
     ]
+
+
+def test_summary_reply_splits_long_html_output(monkeypatch):
+    conn = storage.connect(":memory:")
+    storage.log_message(conn, 1, 1, 10, "alice", "hello", 100)
+
+    monkeypatch.setattr(
+        handlers.llm, "summarize", lambda msgs, settings: "<b>" + ("x" * 9000) + "</b>"
+    )
+
+    message = FakeMessage()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=1),
+        effective_user=SimpleNamespace(id=42, full_name="Bob <admin>"),
+        effective_message=message,
+    )
+    context = SimpleNamespace(bot_data={"conn": conn}, args=[])
+
+    asyncio.run(handlers.summarize_handler(update, context))
+
+    assert len(message.replies) > 1
+    assert all(reply["parse_mode"] == ParseMode.HTML for reply in message.replies)
+    assert all(len(reply["text"]) <= 4096 for reply in message.replies)
+    assert message.replies[0]["text"].startswith('<a href="tg://user?id=42">')
+    assert message.replies[0]["text"].endswith("</b>")
+    assert message.replies[1]["text"].startswith("<b>")

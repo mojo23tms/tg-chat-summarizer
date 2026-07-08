@@ -67,13 +67,12 @@ async def summarize_handler(update, context):
         )
         return
     summary = helpers.scrub(summary, settings["filter_level"], PROFANITY_WORDLIST)
-    summary = helpers.render_summary_html(summary)
+    summary = helpers.render_telegram_html(summary)
     user = update.effective_user
     mention = helpers.format_mention(user.id, user.full_name or "you")
-    await update.effective_message.reply_text(
-        f"{mention}, here is your summary of the last {len(msgs)} messages:\n\n{summary}",
-        parse_mode=ParseMode.HTML,
-    )
+    text = f"{mention}, here is your summary of the last {len(msgs)} messages:\n\n{summary}"
+    for chunk in helpers.split_telegram_html(text):
+        await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
 
 
 async def _change_setting(update, context, key, value):

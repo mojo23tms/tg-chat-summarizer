@@ -177,6 +177,25 @@ def test_summarize_uses_injected_llm_escapes_html_and_sends_reply():
     assert storage.usage_logs[0][2] == 1
 
 
+def test_summarize_splits_long_summary_into_html_chunks():
+    storage = FakeStorage(messages=[{"user_name": "alice", "text": "hi", "ts": 1}])
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(
+        update("/summarize"),
+        storage,
+        telegram,
+        summarize_fn=lambda messages, settings: "<b>" + ("x" * 9000) + "</b>",
+    )
+
+    assert len(telegram.sent) > 1
+    assert all(item["parse_mode"] == ParseMode.HTML for item in telegram.sent)
+    assert all(len(item["text"]) <= 4096 for item in telegram.sent)
+    assert telegram.sent[0]["text"].startswith('<a href="tg://user?id=42">')
+    assert telegram.sent[0]["text"].endswith("</b>")
+    assert telegram.sent[1]["text"].startswith("<b>")
+
+
 def test_summarize_preserves_safe_telegram_html():
     storage = FakeStorage(messages=[{"user_name": "alice", "text": "hi", "ts": 1}])
     telegram = FakeTelegram()
