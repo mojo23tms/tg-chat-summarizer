@@ -6,7 +6,7 @@ resolve_s3 = true
 s3_prefix = "telegram-summarizer-bot"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "AppSecretId=\"telegram-summarizer/prod\" MessageTtlDays=\"365\""
+parameter_overrides = "AppSecretId=\"telegram-summarizer/prod\" MessageTtlDays=\"365\" SummaryMaxMessages=\"5000\""
 image_repositories = []
 disable_rollback = true
 

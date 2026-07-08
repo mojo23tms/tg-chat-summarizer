@@ -17,11 +17,13 @@ class FakeStorage:
         self.usage_logs = []
         self.chat_ids = [10]
         self.pending = {}
+        self.recent_requests = []
 
     def log_message(self, *args):
         self.logged.append(args)
 
     def recent_messages(self, chat_id, n):
+        self.recent_requests.append((chat_id, n))
         return self.messages[-n:]
 
     def get_settings(self, chat_id):
@@ -480,6 +482,7 @@ def test_expired_pending_state_leaves_text_logging_unchanged(monkeypatch):
 def test_summarize_auto_selects_messages_by_token_budget(monkeypatch):
     monkeypatch.setattr(config, "MAX_INPUT_TOKENS", 220)
     monkeypatch.setattr(config, "SUMMARY_OUTPUT_TOKENS", 80)
+    monkeypatch.setattr(config, "SUMMARY_MAX_MESSAGES", 5000)
     messages = [
         {"user_name": "alice", "text": "x" * 120, "ts": ts}
         for ts in range(5)
@@ -500,6 +503,65 @@ def test_summarize_auto_selects_messages_by_token_budget(monkeypatch):
     )
 
     assert 0 < captured["count"] < len(messages)
+    assert storage.recent_requests == [(10, 5000)]
+    assert "(based on context budget)" in telegram.sent[0]["text"]
+
+
+def test_summarize_manual_count_clamps_to_summary_max_messages(monkeypatch):
+    monkeypatch.setattr(config, "SUMMARY_MAX_MESSAGES", 5000)
+    messages = [
+        {"user_name": "alice", "text": f"message {ts}", "ts": ts}
+        for ts in range(6000)
+    ]
+    storage = FakeStorage(messages=messages)
+    telegram = FakeTelegram()
+    captured = {}
+
+    def summarize_fn(selected, settings):
+        captured["count"] = len(selected)
+        return "summary"
+
+    aws_worker.process_update(
+        update("/summarize 999999"),
+        storage,
+        telegram,
+        summarize_fn=summarize_fn,
+    )
+
+    assert storage.recent_requests == [(10, 5000)]
+    assert captured["count"] == 5000
+    assert "last 5000 messages" in telegram.sent[0]["text"]
+
+
+def test_summarize_auto_uses_summary_max_before_token_selection(monkeypatch):
+    monkeypatch.setattr(config, "SUMMARY_MAX_MESSAGES", 7)
+    messages = [
+        {"user_name": "alice", "text": f"message {ts}", "ts": ts}
+        for ts in range(10)
+    ]
+    storage = FakeStorage(messages=messages)
+    telegram = FakeTelegram()
+    captured = {}
+
+    def select_messages(candidate_messages, settings):
+        captured["candidate_count"] = len(candidate_messages)
+        captured["first_ts"] = candidate_messages[0]["ts"]
+        return candidate_messages[-3:]
+
+    monkeypatch.setattr(
+        aws_worker.llm, "select_messages_for_token_budget", select_messages
+    )
+
+    aws_worker.process_update(
+        update("/summarize auto"),
+        storage,
+        telegram,
+        summarize_fn=lambda selected, settings: "summary",
+    )
+
+    assert storage.recent_requests == [(10, 7)]
+    assert captured == {"candidate_count": 7, "first_ts": 3}
+    assert "last 3 messages" in telegram.sent[0]["text"]
     assert "(based on context budget)" in telegram.sent[0]["text"]
 
 

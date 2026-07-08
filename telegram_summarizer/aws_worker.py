@@ -352,7 +352,9 @@ def _handle_summarize(storage, telegram, message, args, summarize_fn, now_fn):
     chat_id = _reply_target(message)
     settings = storage.get_settings(chat_id)
     if args and args[0].lower() == "auto":
-        candidate_messages = storage.recent_messages(chat_id, config.MAX_COUNT)
+        candidate_messages = storage.recent_messages(
+            chat_id, config.SUMMARY_MAX_MESSAGES
+        )
         msgs = llm.select_messages_for_token_budget(candidate_messages, settings)
     else:
         n = helpers.parse_count(args[0] if args else None)

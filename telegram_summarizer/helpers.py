@@ -10,7 +10,7 @@ def parse_count(arg):
         n = int(arg)
     except (TypeError, ValueError):
         return config.DEFAULT_COUNT
-    return max(1, min(n, config.MAX_COUNT))
+    return max(1, min(n, config.SUMMARY_MAX_MESSAGES))
 
 
 def format_mention(user_id, name):

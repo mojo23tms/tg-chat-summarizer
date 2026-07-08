@@ -66,3 +66,41 @@ def test_summary_reply_splits_long_html_output(monkeypatch):
     assert message.replies[0]["text"].startswith('<a href="tg://user?id=42">')
     assert message.replies[0]["text"].endswith("</b>")
     assert message.replies[1]["text"].startswith("<b>")
+
+
+def test_summary_auto_uses_summary_max_before_token_selection(monkeypatch):
+    monkeypatch.setattr(handlers.config, "SUMMARY_MAX_MESSAGES", 4)
+    conn = storage.connect(":memory:")
+    for ts in range(6):
+        storage.log_message(conn, 1, ts, 10, "alice", f"message {ts}", ts)
+
+    captured = {}
+
+    def select_messages(candidate_messages, settings):
+        captured["candidate_count"] = len(candidate_messages)
+        captured["first_ts"] = candidate_messages[0]["ts"]
+        return candidate_messages[-2:]
+
+    def summarize(selected, settings):
+        captured["selected_count"] = len(selected)
+        return "summary"
+
+    monkeypatch.setattr(handlers.llm, "select_messages_for_token_budget", select_messages)
+    monkeypatch.setattr(handlers.llm, "summarize", summarize)
+
+    message = FakeMessage()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=1),
+        effective_user=SimpleNamespace(id=42, full_name="Bob <admin>"),
+        effective_message=message,
+    )
+    context = SimpleNamespace(bot_data={"conn": conn}, args=["auto"])
+
+    asyncio.run(handlers.summarize_handler(update, context))
+
+    assert captured == {
+        "candidate_count": 4,
+        "first_ts": 2,
+        "selected_count": 2,
+    }
+    assert "last 2 messages" in message.replies[0]["text"]

@@ -3,7 +3,8 @@ from telegram_summarizer import config
 
 def test_defaults_present():
     assert config.DEFAULT_COUNT == 30
-    assert config.MAX_COUNT == 200
+    assert config.SUMMARY_MAX_MESSAGES == 5000
+    assert config.MAX_COUNT == config.SUMMARY_MAX_MESSAGES
     assert config.MESSAGE_TTL_DAYS == 365
     assert config.MAX_INPUT_TOKENS == 25000
     assert config.SUMMARY_OUTPUT_TOKENS == 1500

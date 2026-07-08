@@ -75,7 +75,8 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy \
     MessageTtlDays=365 \
     BotOwnerIds="" \
     MaxInputTokens=25000 \
-    SummaryOutputTokens=1500
+    SummaryOutputTokens=1500 \
+    SummaryMaxMessages=5000
 ```
 
 If SAM rejects a `Name=` override, check that the parameter value is not empty.
@@ -140,7 +141,8 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy \
     MessageTtlDays=365 \
     BotOwnerIds="YOUR_USER_ID" \
     MaxInputTokens=25000 \
-    SummaryOutputTokens=1500
+    SummaryOutputTokens=1500 \
+    SummaryMaxMessages=5000
 ```
 
 Then in a DM with the bot:

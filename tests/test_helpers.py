@@ -29,7 +29,9 @@ def test_parse_count_default_and_clamp():
     assert helpers.parse_count("abc") == config.DEFAULT_COUNT
     assert helpers.parse_count("0") == 1
     assert helpers.parse_count("5") == 5
-    assert helpers.parse_count(str(config.MAX_COUNT + 50)) == config.MAX_COUNT
+    assert helpers.parse_count(str(config.SUMMARY_MAX_MESSAGES + 50)) == (
+        config.SUMMARY_MAX_MESSAGES
+    )
 
 
 def test_format_mention_escapes_html():

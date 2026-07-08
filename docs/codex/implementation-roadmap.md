@@ -72,6 +72,10 @@ Use provider selection, shared safety instruction, Telegram-safe output, and usa
 
 Build reusable DynamoDB retrieval for friend-chat history.
 
+If full historical chat export already exists in S3, add an offline S3-to-DynamoDB
+backfill/sync path in this batch so retrieval has the complete history available
+in the runtime datastore. S3 must remain outside the live Telegram request path.
+
 Start cheap:
 
 - keyword search;
@@ -81,6 +85,9 @@ Start cheap:
 - pagination where needed.
 
 Design so semantic search can be added later without changing command handlers.
+
+Add tests for S3 export parsing/backfill idempotency, chat_id scoping, bounded
+imports, and retrieval over imported historical messages.
 
 ## Batch 8: `/ask` Chat-History Q&A
 
@@ -126,7 +133,7 @@ Each command must use memory/retrieval and avoid huge scans.
 
 Evaluate and implement only useful archival integration.
 
-Google Drive is for readable archives, digests, JSON exports, and manual browsing/search. NordLocker is for optional encrypted backup or manual export workflow.
+Google Drive is for readable archives, digests, JSON exports, and manual browsing/search. NordLocker is for optional encrypted backup or manual export workflow. S3 may be used as an AWS-side raw history archive or disaster-recovery source, but runtime commands should consume DynamoDB copies produced by offline import/backfill jobs.
 
 Cloud storage must never be in the live Telegram request path.
 

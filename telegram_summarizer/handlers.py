@@ -49,15 +49,21 @@ async def log_handler(update, context):
 async def summarize_handler(update, context):
     conn = context.bot_data["conn"]
     chat_id = update.effective_chat.id
-    n = helpers.parse_count(context.args[0] if context.args else None)
-    msgs = storage.recent_messages(conn, chat_id, n)
+    settings = storage.get_settings(conn, chat_id)
+    if context.args and context.args[0].lower() == "auto":
+        candidate_messages = storage.recent_messages(
+            conn, chat_id, config.SUMMARY_MAX_MESSAGES
+        )
+        msgs = llm.select_messages_for_token_budget(candidate_messages, settings)
+    else:
+        n = helpers.parse_count(context.args[0] if context.args else None)
+        msgs = storage.recent_messages(conn, chat_id, n)
     if not msgs:
         await update.effective_message.reply_text(
             "I have no logged messages yet — I can only summarize messages "
             "sent after I joined this chat."
         )
         return
-    settings = storage.get_settings(conn, chat_id)
     try:
         summary = llm.summarize(msgs, settings)
     except Exception:
@@ -118,7 +124,7 @@ async def settings_handler(update, context):
 async def help_handler(update, context):
     await update.effective_message.reply_text(
         "/summarize [N] — summarize the last N messages (default "
-        f"{config.DEFAULT_COUNT}, max {config.MAX_COUNT}).\n"
+        f"{config.DEFAULT_COUNT}, max {config.SUMMARY_MAX_MESSAGES}).\n"
         "/setstyle <text>, /setfilter off|clean|strict, /setlang <code|auto> — "
         "admins only.\n/settings — show current settings."
     )

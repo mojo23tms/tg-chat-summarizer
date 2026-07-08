@@ -17,6 +17,7 @@ Globals:
         BOT_OWNER_IDS: !Ref BotOwnerIds
         MAX_INPUT_TOKENS: !Ref MaxInputTokens
         SUMMARY_OUTPUT_TOKENS: !Ref SummaryOutputTokens
+        SUMMARY_MAX_MESSAGES: !Ref SummaryMaxMessages
         LLM_BACKEND: gemini
 
 Parameters:
@@ -35,6 +36,9 @@ Parameters:
   SummaryOutputTokens:
     Type: Number
     Default: 1500
+  SummaryMaxMessages:
+    Type: Number
+    Default: 5000
 
 Resources:
   TelegramApi:

@@ -81,6 +81,7 @@ MessageTtlDays           default 365
 BotOwnerIds              comma-separated Telegram user ids, optional
 MaxInputTokens           default 25000
 SummaryOutputTokens      default 1500
+SummaryMaxMessages       default 5000
 ```
 
 Runtime environment variables used by Lambda:
@@ -93,6 +94,7 @@ MESSAGE_TTL_DAYS=365
 BOT_OWNER_IDS=
 MAX_INPUT_TOKENS=25000
 SUMMARY_OUTPUT_TOKENS=1500
+SUMMARY_MAX_MESSAGES=5000
 LLM_BACKEND=gemini
 ```
 
@@ -153,7 +155,8 @@ LLM_BACKEND=gemini
        MessageTtlDays=365 \
        BotOwnerIds="" \
        MaxInputTokens=25000 \
-       SummaryOutputTokens=1500
+       SummaryOutputTokens=1500 \
+       SummaryMaxMessages=5000
    ```
 
 5. Register Telegram webhook:
@@ -192,7 +195,8 @@ LLM_BACKEND=gemini
        MessageTtlDays=365 \
        BotOwnerIds="YOUR_TELEGRAM_USER_ID" \
        MaxInputTokens=25000 \
-       SummaryOutputTokens=1500
+       SummaryOutputTokens=1500 \
+       SummaryMaxMessages=5000
    ```
 
 ## Daily Workflow
@@ -229,7 +233,7 @@ Slash commands remain available as a fallback:
 
 ```text
 /menu                    open the inline button menu
-/summarize [N|auto]       summarize latest messages; manual max is 200
+/summarize [N|auto]       summarize latest messages; manual max is 5000
 /settings                 show settings for current or selected chat
 /setstyle <text>          set summary style; admins or owner DM
 /setfilter off|clean|strict

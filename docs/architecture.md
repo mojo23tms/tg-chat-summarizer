@@ -197,7 +197,7 @@ history.
 
 `/summarize N`:
 
-1. clamps `N` to `1..MAX_COUNT`
+1. clamps `N` to `1..SUMMARY_MAX_MESSAGES`
 2. reads recent messages for the current chat
 3. builds a Gemini prompt
 4. sanitizes returned Telegram HTML
@@ -206,7 +206,7 @@ history.
 
 `/summarize auto`:
 
-1. reads up to `MAX_COUNT` recent messages
+1. reads up to `SUMMARY_MAX_MESSAGES` recent messages
 2. estimates prompt tokens
 3. selects newest messages fitting `MAX_INPUT_TOKENS - SUMMARY_OUTPUT_TOKENS`
 4. summarizes selected messages
