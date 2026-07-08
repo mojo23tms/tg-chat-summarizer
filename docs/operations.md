@@ -10,6 +10,7 @@ and rolling back the AWS bot.
 - AWS SAM CLI
 - Telegram bot token from BotFather
 - Gemini API key
+- AWS Secrets Manager secret for production credentials
 - Region: `eu-central-1`
 
 On this machine, Homebrew Python/SAM may need:
@@ -28,13 +29,24 @@ source .venv/bin/activate
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-Create secrets:
+Create local shell values for the first secret write:
 
 ```bash
 export TELEGRAM_TOKEN="..."
 export GEMINI_API_KEY="..."
 export TELEGRAM_WEBHOOK_SECRET="$(openssl rand -hex 32)"
 ```
+
+Store them in Secrets Manager:
+
+```bash
+DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws secretsmanager create-secret \
+  --name telegram-summarizer/prod \
+  --secret-string "{\"TELEGRAM_TOKEN\":\"$TELEGRAM_TOKEN\",\"GEMINI_API_KEY\":\"$GEMINI_API_KEY\",\"TELEGRAM_WEBHOOK_SECRET\":\"$TELEGRAM_WEBHOOK_SECRET\"}" \
+  --region eu-central-1
+```
+
+For later rotations, use `put-secret-value` with the same `--secret-id`.
 
 Check AWS identity:
 
@@ -59,22 +71,21 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy \
   --region eu-central-1 \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides \
-    TelegramToken="$TELEGRAM_TOKEN" \
-    GeminiApiKey="$GEMINI_API_KEY" \
-    TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET" \
+    AppSecretId=telegram-summarizer/prod \
     MessageTtlDays=365 \
     BotOwnerIds="" \
     MaxInputTokens=25000 \
     SummaryOutputTokens=1500
 ```
 
-If SAM rejects `GeminiApiKey=` or another `Name=`, that shell variable is empty.
-Check with:
+If SAM rejects a `Name=` override, check that the parameter value is not empty.
+For this stack, the secret value itself is not passed to SAM; only
+`AppSecretId` is.
 
 ```bash
-echo "TELEGRAM_TOKEN set? ${TELEGRAM_TOKEN:+yes}"
-echo "GEMINI_API_KEY set? ${GEMINI_API_KEY:+yes}"
-echo "TELEGRAM_WEBHOOK_SECRET set? ${TELEGRAM_WEBHOOK_SECRET:+yes}"
+DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws secretsmanager describe-secret \
+  --secret-id telegram-summarizer/prod \
+  --region eu-central-1
 ```
 
 ## Register Webhook
@@ -92,12 +103,20 @@ export WEBHOOK_URL="$(DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws cloudformat
 Register Telegram:
 
 ```bash
-.venv/bin/python scripts/set_webhook.py "$WEBHOOK_URL"
+.venv/bin/python scripts/set_webhook.py "$WEBHOOK_URL" \
+  --secret-id telegram-summarizer/prod \
+  --region eu-central-1
 ```
 
 Check Telegram:
 
 ```bash
+export TELEGRAM_TOKEN="$(DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws secretsmanager get-secret-value \
+  --secret-id telegram-summarizer/prod \
+  --query SecretString \
+  --output text \
+  --region eu-central-1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["TELEGRAM_TOKEN"])')"
+
 curl "https://api.telegram.org/bot$TELEGRAM_TOKEN/getWebhookInfo"
 ```
 
@@ -117,9 +136,7 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy \
   --region eu-central-1 \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides \
-    TelegramToken="$TELEGRAM_TOKEN" \
-    GeminiApiKey="$GEMINI_API_KEY" \
-    TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET" \
+    AppSecretId=telegram-summarizer/prod \
     MessageTtlDays=365 \
     BotOwnerIds="YOUR_USER_ID" \
     MaxInputTokens=25000 \
@@ -248,8 +265,9 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws dynamodb query \
 
 ### Webhook Returns 401
 
-`TELEGRAM_WEBHOOK_SECRET` in Lambda does not match the secret registered with
-Telegram. Redeploy with the correct secret and rerun `scripts/set_webhook.py`.
+`TELEGRAM_WEBHOOK_SECRET` in Secrets Manager does not match the secret
+registered with Telegram. Update the secret, redeploy if a warm Lambda is still
+using the old value, and rerun `scripts/set_webhook.py`.
 
 ### Webhook Returns 400
 
@@ -258,7 +276,8 @@ SQS permissions.
 
 ### Worker Logs Telegram 404
 
-Usually means the deployed `TELEGRAM_TOKEN` is wrong or malformed. Verify:
+Usually means the `TELEGRAM_TOKEN` stored in Secrets Manager is wrong or
+malformed. Verify:
 
 ```bash
 curl "https://api.telegram.org/bot$TELEGRAM_TOKEN/getMe"
@@ -306,6 +325,12 @@ For a longer-term fix, reinstall Homebrew Python, expat, AWS CLI, and SAM CLI.
 Disable webhook delivery:
 
 ```bash
+export TELEGRAM_TOKEN="$(DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws secretsmanager get-secret-value \
+  --secret-id telegram-summarizer/prod \
+  --query SecretString \
+  --output text \
+  --region eu-central-1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["TELEGRAM_TOKEN"])')"
+
 curl "https://api.telegram.org/bot$TELEGRAM_TOKEN/deleteWebhook"
 ```
 
@@ -332,7 +357,8 @@ Do not keep webhook and polling active for the same bot token.
 - Run tests before deploy.
 - Validate SAM template before deploy.
 - Keep secrets out of git.
-- Rotate `TELEGRAM_WEBHOOK_SECRET` by redeploying and re-registering the webhook.
+- Rotate `TELEGRAM_WEBHOOK_SECRET` in Secrets Manager, redeploy, and
+  re-register the webhook.
 - Review DynamoDB item count and TTL settings periodically.
 - Watch `/usage month` for token volume.
 - Keep Telegram Desktop exports private; they contain chat history.

@@ -46,11 +46,29 @@ class TelegramApi:
             )
         return parsed["result"]
 
-    def send_message(self, chat_id, text, parse_mode=None):
+    def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
         payload = {"chat_id": chat_id, "text": text}
         if parse_mode:
             payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         return self._post("sendMessage", payload)
+
+    def edit_message_text(
+        self, chat_id, message_id, text, parse_mode=None, reply_markup=None
+    ):
+        payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return self._post("editMessageText", payload)
+
+    def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
+        payload = {"callback_query_id": callback_query_id, "show_alert": show_alert}
+        if text:
+            payload["text"] = text
+        return self._post("answerCallbackQuery", payload)
 
     def get_chat_member(self, chat_id, user_id):
         return self._post("getChatMember", {"chat_id": chat_id, "user_id": user_id})

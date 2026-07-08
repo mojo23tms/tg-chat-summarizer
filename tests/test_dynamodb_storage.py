@@ -39,6 +39,13 @@ class FakeTable:
         setting_key = kwargs["ExpressionAttributeNames"]["#key"]
         item[setting_key] = kwargs["ExpressionAttributeValues"][":value"]
 
+    def delete_item(self, Key):
+        self.items = [
+            item
+            for item in self.items
+            if not (item["pk"] == Key["pk"] and item["sk"] == Key["sk"])
+        ]
+
 
 class FakeResource:
     def __init__(self, table):
@@ -179,3 +186,34 @@ def test_usage_records_do_not_collide_with_same_second(monkeypatch):
     usage_keys = [item["sk"] for item in table.items if item["sk"].startswith("USAGE#")]
     assert len(usage_keys) == 2
     assert len(set(usage_keys)) == 2
+
+
+def test_pending_input_state_round_trips_with_ttl():
+    storage, table = adapter()
+
+    storage.set_pending_input(42, "set_style_custom", -1001, now=100)
+
+    assert table.items[-1] == {
+        "pk": "USER#42",
+        "sk": "PENDING",
+        "action": "set_style_custom",
+        "target_chat_id": -1001,
+        "created_at": 100,
+        "expires_at": 700,
+    }
+    assert storage.get_pending_input(42, now=200) == {
+        "action": "set_style_custom",
+        "target_chat_id": -1001,
+        "created_at": 100,
+        "expires_at": 700,
+    }
+    assert storage.get_pending_input(42, now=700) is None
+
+
+def test_pending_input_delete_removes_state():
+    storage, _table = adapter()
+
+    storage.set_pending_input(42, "set_lang_custom", 10, now=100)
+    storage.delete_pending_input(42)
+
+    assert storage.get_pending_input(42, now=101) is None

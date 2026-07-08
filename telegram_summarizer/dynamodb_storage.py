@@ -11,6 +11,10 @@ def _owner_pk(user_id):
     return f"OWNER#{user_id}"
 
 
+def _user_pk(user_id):
+    return f"USER#{user_id}"
+
+
 def _chat_index_pk():
     return "CHATS"
 
@@ -113,6 +117,37 @@ class DynamoDBStorage:
             ExpressionAttributeNames={"#key": key},
             ExpressionAttributeValues={":value": value},
         )
+
+    def set_pending_input(self, user_id, action, target_chat_id, now=None, ttl_seconds=600):
+        now = int(time.time() if now is None else now)
+        self.table.put_item(
+            Item={
+                "pk": _user_pk(user_id),
+                "sk": "PENDING",
+                "action": action,
+                "target_chat_id": int(target_chat_id),
+                "created_at": now,
+                "expires_at": now + int(ttl_seconds),
+            }
+        )
+
+    def get_pending_input(self, user_id, now=None):
+        response = self.table.get_item(Key={"pk": _user_pk(user_id), "sk": "PENDING"})
+        item = response.get("Item")
+        if not item:
+            return None
+        now = int(time.time() if now is None else now)
+        if int(item.get("expires_at", 0)) <= now:
+            return None
+        return {
+            "action": item.get("action"),
+            "target_chat_id": int(item["target_chat_id"]),
+            "created_at": int(item.get("created_at", 0)),
+            "expires_at": int(item.get("expires_at", 0)),
+        }
+
+    def delete_pending_input(self, user_id):
+        self.table.delete_item(Key={"pk": _user_pk(user_id), "sk": "PENDING"})
 
     def get_owner_active_chat(self, user_id):
         response = self.table.get_item(

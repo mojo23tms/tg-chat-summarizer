@@ -25,10 +25,17 @@ WorkerFunction: telegram_summarizer.aws_worker.lambda_handler
   sends Telegram Bot API replies
 DynamoDB
   stores messages, chat index, settings, owner state, usage
+Secrets Manager
+  stores Telegram token, Gemini key, and webhook secret
 ```
 
 The webhook Lambda returns quickly so Telegram does not retry while Gemini is
 working. Slow work happens asynchronously in the SQS worker.
+
+Both Lambda functions receive `APP_SECRET_ID` and read
+`TELEGRAM_TOKEN`, `GEMINI_API_KEY`, and `TELEGRAM_WEBHOOK_SECRET` from AWS
+Secrets Manager during cold start. Raw production secrets are not passed as SAM
+parameters or stored in Lambda environment variables.
 
 ## Package Layout
 

@@ -7,6 +7,10 @@ from . import config
 # generateContent. The alias always points at a currently-served flash model.
 GEMINI_MODEL = "gemini-flash-latest"
 
+
+class LLMBlockedError(RuntimeError):
+    """Raised when the provider refuses a prompt for safety reasons."""
+
 FILTER_INSTRUCTIONS = {
     "off": "Do not filter language; reproduce tone faithfully.",
     "clean": "Avoid profanity; mask any strong language with asterisks.",
@@ -43,7 +47,15 @@ def _gemini_backend(prompt):
     genai.configure(api_key=config.GEMINI_API_KEY)
     model = genai.GenerativeModel(GEMINI_MODEL)
     resp = model.generate_content(prompt)
-    return resp.text.strip()
+    return _response_text(resp)
+
+
+def _response_text(response):
+    try:
+        return response.text.strip()
+    except ValueError as exc:
+        feedback = getattr(response, "prompt_feedback", None)
+        raise LLMBlockedError(f"Gemini returned no summary candidate: {feedback}") from exc
 
 
 def _usage_metadata(response):
@@ -75,7 +87,7 @@ def _gemini_backend_with_usage(prompt):
     genai.configure(api_key=config.GEMINI_API_KEY)
     model = genai.GenerativeModel(GEMINI_MODEL)
     resp = model.generate_content(prompt)
-    return {"text": resp.text.strip(), "usage": _usage_metadata(resp)}
+    return {"text": _response_text(resp), "usage": _usage_metadata(resp)}
 
 
 def _default_backend():

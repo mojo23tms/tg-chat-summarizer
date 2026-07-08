@@ -16,6 +16,7 @@ class FakeStorage:
         self.owner_active_chat = {}
         self.usage_logs = []
         self.chat_ids = [10]
+        self.pending = {}
 
     def log_message(self, *args):
         self.logged.append(args)
@@ -52,14 +53,56 @@ class FakeStorage:
             "estimated_records": 1,
         }
 
+    def set_pending_input(self, user_id, action, target_chat_id, now=None, ttl_seconds=600):
+        self.pending[user_id] = {
+            "action": action,
+            "target_chat_id": target_chat_id,
+            "created_at": now,
+            "expires_at": now + ttl_seconds,
+        }
+
+    def get_pending_input(self, user_id, now=None):
+        pending = self.pending.get(user_id)
+        if pending and pending["expires_at"] > now:
+            return dict(pending)
+        return None
+
+    def delete_pending_input(self, user_id):
+        self.pending.pop(user_id, None)
+
 
 class FakeTelegram:
     def __init__(self, status="member"):
         self.sent = []
         self.status = status
 
-    def send_message(self, chat_id, text, parse_mode=None):
-        self.sent.append({"chat_id": chat_id, "text": text, "parse_mode": parse_mode})
+    def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
+        item = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+        if reply_markup is not None:
+            item["reply_markup"] = reply_markup
+        self.sent.append(item)
+
+    def edit_message_text(self, chat_id, message_id, text, parse_mode=None, reply_markup=None):
+        self.sent.append(
+            {
+                "method": "edit",
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+                "parse_mode": parse_mode,
+                "reply_markup": reply_markup,
+            }
+        )
+
+    def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
+        self.sent.append(
+            {
+                "method": "answer_callback_query",
+                "callback_query_id": callback_query_id,
+                "text": text,
+                "show_alert": show_alert,
+            }
+        )
 
     def get_chat_member(self, chat_id, user_id):
         return {"status": self.status}
@@ -69,7 +112,7 @@ class FailingTelegram:
     def __init__(self, status_code):
         self.status_code = status_code
 
-    def send_message(self, chat_id, text, parse_mode=None):
+    def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
         raise TelegramApiError("telegram failed", status_code=self.status_code)
 
 
@@ -80,6 +123,20 @@ def update(text, chat_id=10, user_id=42, message_id=7, chat_type="group"):
             "chat": {"id": chat_id, "type": chat_type},
             "from": {"id": user_id, "first_name": "Bob", "last_name": "<Admin>"},
             "text": text,
+        }
+    }
+
+
+def callback(data, chat_id=10, user_id=42, message_id=99, chat_type="group"):
+    return {
+        "callback_query": {
+            "id": "cb-1",
+            "from": {"id": user_id, "first_name": "Bob", "last_name": "<Admin>"},
+            "message": {
+                "message_id": message_id,
+                "chat": {"id": chat_id, "type": chat_type},
+            },
+            "data": data,
         }
     }
 
@@ -250,6 +307,157 @@ def test_whoami_reports_user_and_chat_ids():
     ]
 
 
+def test_menu_command_sends_inline_main_menu():
+    storage = FakeStorage()
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(update("/menu"), storage, telegram)
+
+    assert telegram.sent[0]["chat_id"] == 10
+    assert telegram.sent[0]["text"].startswith("Menu")
+    assert telegram.sent[0]["reply_markup"]["inline_keyboard"][0][0] == {
+        "text": "Summarize",
+        "callback_data": "menu:summarize",
+    }
+
+
+def test_callback_query_home_edits_menu_and_answers_spinner():
+    storage = FakeStorage()
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(callback("menu:home"), storage, telegram)
+
+    assert telegram.sent[0]["method"] == "answer_callback_query"
+    assert telegram.sent[1]["method"] == "edit"
+    assert telegram.sent[1]["message_id"] == 99
+    assert telegram.sent[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == (
+        "menu:summarize"
+    )
+
+
+def test_summary_button_calls_existing_summary_behavior_with_count():
+    storage = FakeStorage(
+        messages=[{"user_name": "alice", "text": f"m{i}", "ts": i} for i in range(150)]
+    )
+    telegram = FakeTelegram()
+    captured = {}
+
+    def summarize_fn(messages, settings):
+        captured["count"] = len(messages)
+        return "summary"
+
+    aws_worker.process_update(
+        callback("sum:100"),
+        storage,
+        telegram,
+        summarize_fn=summarize_fn,
+        now_fn=lambda: 500,
+    )
+
+    assert telegram.sent[0]["method"] == "answer_callback_query"
+    assert captured["count"] == 100
+    assert "last 100 messages" in telegram.sent[1]["text"]
+
+
+def test_settings_button_rejects_non_admin_group_users():
+    storage = FakeStorage()
+    telegram = FakeTelegram(status="member")
+
+    aws_worker.process_update(callback("settings:filter:strict"), storage, telegram)
+
+    assert storage.setting_updates == []
+    assert telegram.sent[1]["method"] == "edit"
+    assert telegram.sent[1]["text"] == "Only admins can change settings."
+
+
+def test_admin_setting_button_updates_and_refreshes_settings_menu():
+    storage = FakeStorage()
+    telegram = FakeTelegram(status="administrator")
+
+    aws_worker.process_update(callback("settings:filter:strict"), storage, telegram)
+
+    assert storage.setting_updates == [(10, "filter_level", "strict")]
+    assert telegram.sent[1]["method"] == "edit"
+    assert "filter: strict" in telegram.sent[1]["text"]
+    assert telegram.sent[1]["reply_markup"]["inline_keyboard"][0][2] == {
+        "text": "Strict",
+        "callback_data": "settings:filter:strict",
+    }
+
+
+def test_owner_dm_chat_picker_sets_active_chat_and_applies_setting(monkeypatch):
+    monkeypatch.setattr(config, "BOT_OWNER_IDS", {42})
+    storage = FakeStorage()
+    storage.chat_ids = [-1001, -1002]
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(
+        callback("owner:chats", chat_id=42, user_id=42, chat_type="private"),
+        storage,
+        telegram,
+    )
+    aws_worker.process_update(
+        callback("owner:chat:-1001", chat_id=42, user_id=42, chat_type="private"),
+        storage,
+        telegram,
+    )
+    aws_worker.process_update(
+        callback("settings:lang:en", chat_id=42, user_id=42, chat_type="private"),
+        storage,
+        telegram,
+    )
+
+    assert storage.owner_active_chat[42] == -1001
+    assert storage.setting_updates[-1] == (-1001, "language", "English")
+    assert any(item.get("reply_markup") for item in telegram.sent if item.get("method") == "edit")
+
+
+def test_custom_style_pending_input_is_consumed_without_logging(monkeypatch):
+    monkeypatch.setattr(config, "BOT_OWNER_IDS", {42})
+    storage = FakeStorage()
+    storage.owner_active_chat[42] = -1001
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(
+        callback("settings:style:custom", chat_id=42, user_id=42, chat_type="private"),
+        storage,
+        telegram,
+        now_fn=lambda: 100,
+    )
+    aws_worker.process_update(
+        update("write in haiku", chat_id=42, user_id=42, chat_type="private"),
+        storage,
+        telegram,
+        now_fn=lambda: 120,
+    )
+
+    assert storage.setting_updates == [(-1001, "style", "write in haiku")]
+    assert storage.logged == []
+    assert storage.pending == {}
+
+
+def test_expired_pending_state_leaves_text_logging_unchanged(monkeypatch):
+    monkeypatch.setattr(config, "BOT_OWNER_IDS", {42})
+    storage = FakeStorage()
+    storage.pending[42] = {
+        "action": "set_lang_custom",
+        "target_chat_id": -1001,
+        "created_at": 100,
+        "expires_at": 200,
+    }
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(
+        update("hello", chat_id=42, user_id=42, chat_type="private"),
+        storage,
+        telegram,
+        now_fn=lambda: 201,
+    )
+
+    assert storage.setting_updates == []
+    assert storage.logged[0][4] == "hello"
+
+
 def test_summarize_auto_selects_messages_by_token_budget(monkeypatch):
     monkeypatch.setattr(config, "MAX_INPUT_TOKENS", 220)
     monkeypatch.setattr(config, "SUMMARY_OUTPUT_TOKENS", 80)
@@ -274,6 +482,52 @@ def test_summarize_auto_selects_messages_by_token_budget(monkeypatch):
 
     assert 0 < captured["count"] < len(messages)
     assert "(based on context budget)" in telegram.sent[0]["text"]
+
+
+def test_summarize_retries_smaller_window_when_provider_blocks_large_prompt():
+    messages = [
+        {"user_name": "alice", "text": f"message {ts}", "ts": ts}
+        for ts in range(config.DEFAULT_COUNT + 5)
+    ]
+    storage = FakeStorage(messages=messages)
+    telegram = FakeTelegram()
+    calls = []
+
+    def summarize_fn(selected, settings):
+        calls.append(len(selected))
+        if len(selected) > config.DEFAULT_COUNT:
+            raise aws_worker.llm.LLMBlockedError("blocked")
+        return "fallback summary"
+
+    aws_worker.process_update(
+        update("/summarize 200"),
+        storage,
+        telegram,
+        summarize_fn=summarize_fn,
+        now_fn=lambda: 1234,
+    )
+
+    assert calls == [config.DEFAULT_COUNT + 5, config.DEFAULT_COUNT]
+    assert "fallback summary" in telegram.sent[0]["text"]
+    assert "(reduced after Gemini safety block)" in telegram.sent[0]["text"]
+    assert storage.usage_logs[0][2] == config.DEFAULT_COUNT
+
+
+def test_summarize_reports_blocked_prompt_when_no_smaller_fallback_exists():
+    storage = FakeStorage(messages=[{"user_name": "alice", "text": "hi", "ts": 1}])
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(
+        update("/summarize"),
+        storage,
+        telegram,
+        summarize_fn=lambda messages, settings: (_ for _ in ()).throw(
+            aws_worker.llm.LLMBlockedError("blocked")
+        ),
+    )
+
+    assert "Gemini blocked this summary request" in telegram.sent[0]["text"]
+    assert storage.usage_logs == []
 
 
 def test_handle_sqs_event_routes_records():

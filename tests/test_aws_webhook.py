@@ -57,6 +57,32 @@ def test_valid_update_enqueues_fifo_message_and_returns_ok(monkeypatch):
     ]
 
 
+def test_callback_query_update_groups_by_callback_message_chat(monkeypatch):
+    monkeypatch.setattr(aws_webhook.config, "TELEGRAM_WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(aws_webhook.config, "QUEUE_URL", "queue-url")
+    sqs = FakeSqs()
+    update = {
+        "update_id": 124,
+        "callback_query": {
+            "id": "cb-1",
+            "message": {"chat": {"id": -200}},
+            "data": "menu:home",
+        },
+    }
+
+    response = aws_webhook.lambda_handler(
+        {
+            "headers": {"x-telegram-bot-api-secret-token": "secret"},
+            "body": json.dumps(update),
+        },
+        None,
+        sqs_client=sqs,
+    )
+
+    assert response["statusCode"] == 200
+    assert sqs.messages[0]["MessageGroupId"] == "-200"
+
+
 def test_valid_update_without_queue_url_returns_bad_request(monkeypatch):
     monkeypatch.setattr(aws_webhook.config, "TELEGRAM_WEBHOOK_SECRET", "secret")
     monkeypatch.setattr(aws_webhook.config, "QUEUE_URL", "")

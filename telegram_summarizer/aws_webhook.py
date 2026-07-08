@@ -20,6 +20,10 @@ def _chat_id(update):
         chat = (update.get(key) or {}).get("chat") or {}
         if "id" in chat:
             return chat["id"]
+    callback_message = ((update.get("callback_query") or {}).get("message") or {})
+    chat = callback_message.get("chat") or {}
+    if "id" in chat:
+        return chat["id"]
     return "global"
 
 

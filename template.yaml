@@ -10,9 +10,7 @@ Globals:
     MemorySize: 256
     Environment:
       Variables:
-        TELEGRAM_TOKEN: !Ref TelegramToken
-        GEMINI_API_KEY: !Ref GeminiApiKey
-        TELEGRAM_WEBHOOK_SECRET: !Ref TelegramWebhookSecret
+        APP_SECRET_ID: !Ref AppSecretId
         DDB_TABLE_NAME: !Ref BotTable
         QUEUE_URL: !Ref UpdateQueue
         MESSAGE_TTL_DAYS: !Ref MessageTtlDays
@@ -22,15 +20,9 @@ Globals:
         LLM_BACKEND: gemini
 
 Parameters:
-  TelegramToken:
+  AppSecretId:
     Type: String
-    NoEcho: true
-  GeminiApiKey:
-    Type: String
-    NoEcho: true
-  TelegramWebhookSecret:
-    Type: String
-    NoEcho: true
+    Default: telegram-summarizer/prod
   MessageTtlDays:
     Type: Number
     Default: 365
@@ -55,6 +47,11 @@ Resources:
       Policies:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt UpdateQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AppSecretId}*"
       Events:
         TelegramWebhook:
           Type: HttpApi
@@ -73,6 +70,11 @@ Resources:
             TableName: !Ref BotTable
         - SQSPollerPolicy:
             QueueName: !GetAtt UpdateQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AppSecretId}*"
       Events:
         Queue:
           Type: SQS

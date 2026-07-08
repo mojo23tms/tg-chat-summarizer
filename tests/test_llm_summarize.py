@@ -42,6 +42,18 @@ def test_summarize_with_usage_estimates_for_injected_backend():
     assert result["usage"]["total_tokens"] > 0
 
 
+def test_response_text_raises_blocked_error_for_empty_candidates():
+    class BlockedResponse:
+        prompt_feedback = "block_reason: PROHIBITED_CONTENT"
+
+        @property
+        def text(self):
+            raise ValueError("response.candidates is empty")
+
+    with pytest.raises(llm.LLMBlockedError, match="PROHIBITED_CONTENT"):
+        llm._response_text(BlockedResponse())
+
+
 def test_select_messages_for_token_budget_keeps_recent_messages():
     settings = {"style": "s", "filter_level": "off", "language": "auto"}
     msgs = [{"user_name": "a", "text": "x" * 80, "ts": ts} for ts in range(5)]

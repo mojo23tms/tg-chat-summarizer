@@ -24,3 +24,28 @@ def test_int_env_parsing(monkeypatch):
 def test_owner_ids_parsing(monkeypatch):
     monkeypatch.setenv("EXAMPLE_IDS", "1, 2,3")
     assert config._int_set_env("EXAMPLE_IDS") == {1, 2, 3}
+
+
+def test_secret_or_env_prefers_environment(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_TOKEN", "from-env")
+    monkeypatch.setattr(config, "_SECRET_CACHE", {"TELEGRAM_TOKEN": "from-secret"})
+
+    assert config._secret_or_env("TELEGRAM_TOKEN") == "from-env"
+
+
+def test_secret_or_env_reads_cached_secret(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.setattr(config, "_SECRET_CACHE", {"TELEGRAM_TOKEN": "from-secret"})
+
+    assert config._secret_or_env("TELEGRAM_TOKEN") == "from-secret"
+
+
+def test_load_app_secret_from_client():
+    class FakeSecrets:
+        def get_secret_value(self, SecretId):
+            assert SecretId == "secret-id"
+            return {"SecretString": '{"TELEGRAM_TOKEN":"token"}'}
+
+    assert config._load_app_secret("secret-id", FakeSecrets()) == {
+        "TELEGRAM_TOKEN": "token"
+    }

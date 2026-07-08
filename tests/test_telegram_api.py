@@ -63,6 +63,46 @@ def test_send_message_uses_injected_opener_without_network():
     }
 
 
+def test_send_message_can_include_inline_keyboard():
+    opener = FakeOpener({"ok": True, "result": {"message_id": 1}})
+    api = TelegramApi(token="token", opener=opener)
+    reply_markup = {"inline_keyboard": [[{"text": "Menu", "callback_data": "menu:home"}]]}
+
+    api.send_message(123, "hello", reply_markup=reply_markup)
+
+    assert json.loads(opener.requests[0]["request"].data.decode("utf-8")) == {
+        "chat_id": 123,
+        "text": "hello",
+        "reply_markup": reply_markup,
+    }
+
+
+def test_edit_message_text_and_answer_callback_query_use_json_payloads():
+    opener = FakeOpener({"ok": True, "result": True})
+    api = TelegramApi(token="token", opener=opener)
+
+    api.edit_message_text(123, 7, "updated", reply_markup={"inline_keyboard": []})
+    api.answer_callback_query("callback-id", text="Done", show_alert=True)
+
+    edit_request = opener.requests[0]["request"]
+    answer_request = opener.requests[1]["request"]
+    assert edit_request.full_url == "https://api.telegram.org/bottoken/editMessageText"
+    assert json.loads(edit_request.data.decode("utf-8")) == {
+        "chat_id": 123,
+        "message_id": 7,
+        "text": "updated",
+        "reply_markup": {"inline_keyboard": []},
+    }
+    assert answer_request.full_url == (
+        "https://api.telegram.org/bottoken/answerCallbackQuery"
+    )
+    assert json.loads(answer_request.data.decode("utf-8")) == {
+        "callback_query_id": "callback-id",
+        "show_alert": True,
+        "text": "Done",
+    }
+
+
 def test_telegram_api_raises_on_api_error_without_retrying_network():
     opener = FakeOpener({"ok": False, "description": "bad token"})
     api = TelegramApi(token="token", opener=opener)

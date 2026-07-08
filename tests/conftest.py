@@ -1,7 +1,11 @@
+import os
 import socket
 import urllib.request
 
 import pytest
+
+
+os.environ.pop("APP_SECRET_ID", None)
 
 
 @pytest.fixture(autouse=True)
@@ -22,6 +26,7 @@ def no_external_network(monkeypatch):
 @pytest.fixture(autouse=True)
 def fake_service_secrets(monkeypatch):
     """Use harmless defaults if code reads config during tests."""
+    monkeypatch.setenv("APP_SECRET_ID", "")
     monkeypatch.setenv("TELEGRAM_TOKEN", "test-telegram-token")
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "test-webhook-secret")

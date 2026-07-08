@@ -9,8 +9,8 @@ development and rollback.
 
 - Receives Telegram updates through a secure webhook.
 - Stores normal text messages per chat in DynamoDB.
-- Summarizes recent chat history with `/summarize`, `/summarize N`, or
-  `/summarize auto`.
+- Summarizes recent chat history from inline buttons, with `/summarize`,
+  `/summarize N`, and `/summarize auto` kept as fallbacks.
 - Replies with Telegram HTML formatting.
 - Tracks estimated or provider-reported token usage.
 - Lets configured bot owners manage group settings from direct messages.
@@ -37,6 +37,7 @@ development and rollback.
   - Lambda
   - SQS FIFO
   - DynamoDB on-demand with TTL
+  - Secrets Manager
   - CloudWatch Logs
 - LLM: Gemini via `google-generativeai`
 - Telegram API:
@@ -75,9 +76,7 @@ Dockerfile / fly.toml   legacy Fly.io deployment path
 Production SAM parameters:
 
 ```text
-TelegramToken            BotFather token
-GeminiApiKey             Gemini API key
-TelegramWebhookSecret    random secret passed to Telegram setWebhook
+AppSecretId              Secrets Manager secret name
 MessageTtlDays           default 365
 BotOwnerIds              comma-separated Telegram user ids, optional
 MaxInputTokens           default 25000
@@ -87,9 +86,7 @@ SummaryOutputTokens      default 1500
 Runtime environment variables used by Lambda:
 
 ```text
-TELEGRAM_TOKEN
-GEMINI_API_KEY
-TELEGRAM_WEBHOOK_SECRET
+APP_SECRET_ID=telegram-summarizer/prod
 DDB_TABLE_NAME
 QUEUE_URL
 MESSAGE_TTL_DAYS=365
@@ -97,6 +94,16 @@ BOT_OWNER_IDS=
 MAX_INPUT_TOKENS=25000
 SUMMARY_OUTPUT_TOKENS=1500
 LLM_BACKEND=gemini
+```
+
+`APP_SECRET_ID` must point to a JSON secret containing:
+
+```json
+{
+  "TELEGRAM_TOKEN": "...",
+  "GEMINI_API_KEY": "...",
+  "TELEGRAM_WEBHOOK_SECRET": "..."
+}
 ```
 
 ## Fresh Launch
@@ -109,13 +116,21 @@ LLM_BACKEND=gemini
    .venv/bin/python -m pip install -r requirements.txt
    ```
 
-2. Create or collect secrets:
+2. Create or update the production secret:
 
    ```bash
    export TELEGRAM_TOKEN="..."
    export GEMINI_API_KEY="..."
    export TELEGRAM_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+
+   DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws secretsmanager put-secret-value \
+     --secret-id telegram-summarizer/prod \
+     --secret-string "{\"TELEGRAM_TOKEN\":\"$TELEGRAM_TOKEN\",\"GEMINI_API_KEY\":\"$GEMINI_API_KEY\",\"TELEGRAM_WEBHOOK_SECRET\":\"$TELEGRAM_WEBHOOK_SECRET\"}" \
+     --region eu-central-1
    ```
+
+   If the secret does not exist yet, use `aws secretsmanager create-secret`
+   with the same `--name`, `--secret-string`, and `--region`.
 
 3. Validate locally:
 
@@ -134,9 +149,7 @@ LLM_BACKEND=gemini
      --region eu-central-1 \
      --capabilities CAPABILITY_IAM \
      --parameter-overrides \
-       TelegramToken="$TELEGRAM_TOKEN" \
-       GeminiApiKey="$GEMINI_API_KEY" \
-       TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET" \
+       AppSecretId=telegram-summarizer/prod \
        MessageTtlDays=365 \
        BotOwnerIds="" \
        MaxInputTokens=25000 \
@@ -152,18 +165,19 @@ LLM_BACKEND=gemini
      --query 'Stacks[0].Outputs[?OutputKey==`WebhookUrl`].OutputValue' \
      --output text)"
 
-   .venv/bin/python scripts/set_webhook.py "$WEBHOOK_URL"
+   .venv/bin/python scripts/set_webhook.py "$WEBHOOK_URL" \
+     --secret-id telegram-summarizer/prod \
+     --region eu-central-1
    ```
 
 6. Verify in Telegram:
 
    ```text
-   /help
+   /menu
    /whoami
    normal test message
-   /summarize
-   /summarize auto
-   /usage
+   tap Summarize
+   tap Usage
    ```
 
 7. Redeploy with `BotOwnerIds` after `/whoami` returns your `user_id`:
@@ -174,9 +188,7 @@ LLM_BACKEND=gemini
      --region eu-central-1 \
      --capabilities CAPABILITY_IAM \
      --parameter-overrides \
-       TelegramToken="$TELEGRAM_TOKEN" \
-       GeminiApiKey="$GEMINI_API_KEY" \
-       TelegramWebhookSecret="$TELEGRAM_WEBHOOK_SECRET" \
+       AppSecretId=telegram-summarizer/prod \
        MessageTtlDays=365 \
        BotOwnerIds="YOUR_TELEGRAM_USER_ID" \
        MaxInputTokens=25000 \
@@ -209,9 +221,14 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam logs \
   --tail
 ```
 
-## Bot Commands
+## Bot Menu And Commands
+
+In AWS production, `/start`, `/help`, and `/menu` open the inline button menu.
+Use the menu to summarize, inspect usage, view settings, and change settings.
+Slash commands remain available as a fallback:
 
 ```text
+/menu                    open the inline button menu
 /summarize [N|auto]       summarize latest messages; manual max is 200
 /settings                 show settings for current or selected chat
 /setstyle <text>          set summary style; admins or owner DM
@@ -221,7 +238,7 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam logs \
 /whoami                   show your user id and chat id
 /chats                    owner DM: list known chat ids
 /usechat <chat_id>        owner DM: select target chat
-/help or /start           show command help
+/help or /start           open the inline button menu
 ```
 
 ## Important Operational Rules
