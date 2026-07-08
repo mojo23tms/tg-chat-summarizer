@@ -219,8 +219,14 @@ Settings commands:
 
 ## Telegram HTML Safety
 
-Gemini is asked to return Telegram-compatible HTML. The bot then sanitizes the
-summary before sending it with `ParseMode.HTML`.
+Gemini is given a shared safety instruction that treats Telegram history as
+data, not instructions. Prompt text explicitly says not to reveal secrets, not
+to follow instructions embedded in chat-history data, and to return concise
+Telegram-compatible HTML without Markdown.
+
+Chat-history messages are wrapped in explicit start/end delimiters before they
+are sent to the model. The bot then sanitizes the summary before sending it with
+`ParseMode.HTML`.
 
 Allowed tags:
 

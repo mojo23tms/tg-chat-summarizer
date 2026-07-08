@@ -15,7 +15,7 @@ def test_summarize_uses_injected_backend():
     out = llm.summarize(msgs, settings, backend_fn=fake_backend)
     assert out == "SUMMARY TEXT"
     assert "hello world" in captured["prompt"]
-    assert "Telegram-compatible HTML" in captured["prompt"]
+    assert "Telegram-compatible HTML only" in captured["prompt"]
 
 
 def test_summarize_empty_messages_short_circuits():
