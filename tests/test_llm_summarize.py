@@ -425,7 +425,7 @@ def test_gemini_generate_passes_optional_output_limit(monkeypatch):
     assert captured["generation_config"] == {"max_output_tokens": 321}
 
 
-def test_gemini_generate_retries_one_transient_cancellation(monkeypatch):
+def test_gemini_generate_wraps_transient_cancellation_without_retry(monkeypatch):
     fake = types.ModuleType("google.generativeai")
     fake.configure = lambda api_key=None: None
     calls = []
@@ -439,44 +439,16 @@ def test_gemini_generate_retries_one_transient_cancellation(monkeypatch):
 
         def generate_content(self, prompt, **kwargs):
             calls.append(prompt)
-            if len(calls) == 1:
-                raise Cancelled("operation cancelled")
-            return types.SimpleNamespace(text="recovered", candidates=[])
+            raise Cancelled("operation cancelled")
 
     fake.GenerativeModel = FakeModel
     monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
     monkeypatch.setitem(sys.modules, "google.generativeai", fake)
 
-    result = llm._gemini_generate("prompt")
-
-    assert result.text == "recovered"
-    assert calls == ["prompt", "prompt"]
-
-
-def test_gemini_generate_stops_after_second_transient_failure(monkeypatch):
-    fake = types.ModuleType("google.generativeai")
-    fake.configure = lambda api_key=None: None
-    calls = []
-
-    class DeadlineExceeded(Exception):
-        pass
-
-    class FakeModel:
-        def __init__(self, name):
-            pass
-
-        def generate_content(self, prompt, **kwargs):
-            calls.append(prompt)
-            raise DeadlineExceeded("deadline")
-
-    fake.GenerativeModel = FakeModel
-    monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
-    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
-
-    with pytest.raises(llm.LLMTransientError, match="failed twice"):
+    with pytest.raises(llm.LLMTransientError, match="transient provider error"):
         llm._gemini_generate("prompt")
 
-    assert calls == ["prompt", "prompt"]
+    assert calls == ["prompt"]
 
 
 def test_gemini_generate_does_not_retry_non_transient_errors(monkeypatch):

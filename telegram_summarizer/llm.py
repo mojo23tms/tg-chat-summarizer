@@ -1,5 +1,4 @@
 import json
-import logging
 import math
 from dataclasses import asdict, dataclass
 from urllib import request
@@ -7,11 +6,9 @@ from urllib.error import HTTPError
 
 from . import config
 
-logger = logging.getLogger(__name__)
-
-# Use the moving "latest flash" alias rather than a pinned version: pinned
-# models (e.g. gemini-1.5-flash) get retired and then return 404 on
-# generateContent. The alias always points at a currently-served flash model.
+# Use Google's stable, low-cost Flash-Lite model by default. Moving "latest"
+# aliases can point at capacity-constrained models and caused repeated 45-second
+# timeouts in production.
 GEMINI_MODEL = config.GEMINI_MODEL
 GROQ_MODEL = config.GROQ_MODEL
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -312,21 +309,14 @@ def _gemini_generate(prompt, model=None, max_output_tokens=None):
         "InternalServerError",
         "ServiceUnavailable",
     }
-    for attempt in range(2):
-        try:
-            resp = gemini_model.generate_content(prompt, **kwargs)
-            break
-        except Exception as exc:
-            if exc.__class__.__name__ not in transient_names:
-                raise
-            if attempt == 0:
-                logger.warning(
-                    "transient Gemini request failure; retrying once: %s", exc
-                )
-                continue
-            raise LLMTransientError(
-                "Gemini request failed twice due to a transient provider error"
-            ) from exc
+    try:
+        resp = gemini_model.generate_content(prompt, **kwargs)
+    except Exception as exc:
+        if exc.__class__.__name__ not in transient_names:
+            raise
+        raise LLMTransientError(
+            "Gemini request failed due to a transient provider error"
+        ) from exc
     usage = _usage_metadata(resp)
     if usage:
         usage["model"] = model_name

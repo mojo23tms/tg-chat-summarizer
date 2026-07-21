@@ -122,7 +122,7 @@ QUOTA_WARNING_REMAINING_PERCENT=10
 LLM_BACKEND=gemini
 DEFAULT_LLM_PROVIDER=gemini
 DEFAULT_LLM_MODEL=
-GEMINI_MODEL=gemini-flash-latest
+GEMINI_MODEL=gemini-2.5-flash-lite
 GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
