@@ -1,10 +1,13 @@
 import json
+import logging
 import math
 from dataclasses import asdict, dataclass
 from urllib import request
 from urllib.error import HTTPError
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 # Use the moving "latest flash" alias rather than a pinned version: pinned
 # models (e.g. gemini-1.5-flash) get retired and then return 404 on
@@ -26,6 +29,10 @@ AVAILABLE_MODELS = {
 
 class LLMBlockedError(RuntimeError):
     """Raised when the provider refuses a prompt for safety reasons."""
+
+
+class LLMTransientError(RuntimeError):
+    """Raised after a transient provider failure still fails on retry."""
 
 
 @dataclass
@@ -299,7 +306,27 @@ def _gemini_generate(prompt, model=None, max_output_tokens=None):
     kwargs = {"request_options": {"timeout": config.LLM_REQUEST_TIMEOUT_SECONDS}}
     if max_output_tokens is not None:
         kwargs["generation_config"] = {"max_output_tokens": int(max_output_tokens)}
-    resp = gemini_model.generate_content(prompt, **kwargs)
+    transient_names = {
+        "Cancelled",
+        "DeadlineExceeded",
+        "InternalServerError",
+        "ServiceUnavailable",
+    }
+    for attempt in range(2):
+        try:
+            resp = gemini_model.generate_content(prompt, **kwargs)
+            break
+        except Exception as exc:
+            if exc.__class__.__name__ not in transient_names:
+                raise
+            if attempt == 0:
+                logger.warning(
+                    "transient Gemini request failure; retrying once: %s", exc
+                )
+                continue
+            raise LLMTransientError(
+                "Gemini request failed twice due to a transient provider error"
+            ) from exc
     usage = _usage_metadata(resp)
     if usage:
         usage["model"] = model_name

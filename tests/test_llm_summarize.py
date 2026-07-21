@@ -425,6 +425,83 @@ def test_gemini_generate_passes_optional_output_limit(monkeypatch):
     assert captured["generation_config"] == {"max_output_tokens": 321}
 
 
+def test_gemini_generate_retries_one_transient_cancellation(monkeypatch):
+    fake = types.ModuleType("google.generativeai")
+    fake.configure = lambda api_key=None: None
+    calls = []
+
+    class Cancelled(Exception):
+        pass
+
+    class FakeModel:
+        def __init__(self, name):
+            pass
+
+        def generate_content(self, prompt, **kwargs):
+            calls.append(prompt)
+            if len(calls) == 1:
+                raise Cancelled("operation cancelled")
+            return types.SimpleNamespace(text="recovered", candidates=[])
+
+    fake.GenerativeModel = FakeModel
+    monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
+    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
+
+    result = llm._gemini_generate("prompt")
+
+    assert result.text == "recovered"
+    assert calls == ["prompt", "prompt"]
+
+
+def test_gemini_generate_stops_after_second_transient_failure(monkeypatch):
+    fake = types.ModuleType("google.generativeai")
+    fake.configure = lambda api_key=None: None
+    calls = []
+
+    class DeadlineExceeded(Exception):
+        pass
+
+    class FakeModel:
+        def __init__(self, name):
+            pass
+
+        def generate_content(self, prompt, **kwargs):
+            calls.append(prompt)
+            raise DeadlineExceeded("deadline")
+
+    fake.GenerativeModel = FakeModel
+    monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
+    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
+
+    with pytest.raises(llm.LLMTransientError, match="failed twice"):
+        llm._gemini_generate("prompt")
+
+    assert calls == ["prompt", "prompt"]
+
+
+def test_gemini_generate_does_not_retry_non_transient_errors(monkeypatch):
+    fake = types.ModuleType("google.generativeai")
+    fake.configure = lambda api_key=None: None
+    calls = []
+
+    class FakeModel:
+        def __init__(self, name):
+            pass
+
+        def generate_content(self, prompt, **kwargs):
+            calls.append(prompt)
+            raise ValueError("bad request")
+
+    fake.GenerativeModel = FakeModel
+    monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
+    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
+
+    with pytest.raises(ValueError, match="bad request"):
+        llm._gemini_generate("prompt")
+
+    assert calls == ["prompt"]
+
+
 def test_groq_generate_posts_chat_completion_and_parses_usage(monkeypatch):
     monkeypatch.setattr("telegram_summarizer.config.GROQ_API_KEY", "secret")
     monkeypatch.setattr("telegram_summarizer.config.LLM_REQUEST_TIMEOUT_SECONDS", 12)
