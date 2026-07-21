@@ -27,8 +27,10 @@ def _ensure_event_loop():
 def main():
     if not config.TELEGRAM_TOKEN:
         raise SystemExit("TELEGRAM_TOKEN is required (set it as an environment variable).")
-    if not config.GEMINI_API_KEY:
-        raise SystemExit("GEMINI_API_KEY is required (set it as an environment variable).")
+    if not config.GEMINI_API_KEY and not config.GROQ_API_KEY:
+        raise SystemExit(
+            "At least one LLM provider key is required: GEMINI_API_KEY or GROQ_API_KEY."
+        )
     _ensure_event_loop()
     data_dir = os.path.dirname(config.DB_PATH) or "."
     os.makedirs(data_dir, exist_ok=True)

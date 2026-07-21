@@ -1,6 +1,7 @@
 import time
 
 from . import config
+from .retrieval import rank_memory_snapshots
 
 
 def _chat_pk(chat_id):
@@ -25,6 +26,22 @@ def _chat_index_sk(chat_id):
 
 def _message_sk(ts, msg_id):
     return f"MSG#{int(ts):020d}#{int(msg_id):020d}"
+
+
+def _message_range_start(ts):
+    return f"MSG#{int(ts):020d}#"
+
+
+def _message_range_end(ts):
+    return f"MSG#{int(ts):020d}#\uffff"
+
+
+def _quota_warning_sk(provider, day):
+    return f"QUOTA_WARN#{provider}#{day}"
+
+
+def _memory_sk(start_ts, end_ts):
+    return f"MEMORY#{int(start_ts):020d}#{int(end_ts):020d}"
 
 
 class DynamoDBStorage:
@@ -100,6 +117,84 @@ class DynamoDBStorage:
         ]
         rows.reverse()
         return rows
+
+    def message_page(
+        self,
+        chat_id,
+        *,
+        start_ts=0,
+        end_ts=99_999_999_999,
+        limit=100,
+        exclusive_start_key=None,
+    ):
+        start_ts = int(start_ts)
+        end_ts = int(end_ts)
+        limit = int(limit)
+        if start_ts > end_ts:
+            return [], None
+        if limit < 1:
+            raise ValueError("limit must be positive")
+
+        kwargs = {
+            "KeyConditionExpression": "pk = :pk AND sk BETWEEN :start AND :end",
+            "ExpressionAttributeValues": {
+                ":pk": _chat_pk(chat_id),
+                ":start": _message_range_start(start_ts),
+                ":end": _message_range_end(end_ts),
+            },
+            "ScanIndexForward": False,
+            "Limit": limit,
+        }
+        if exclusive_start_key is not None:
+            kwargs["ExclusiveStartKey"] = exclusive_start_key
+        response = self.table.query(**kwargs)
+        rows = [
+            {
+                "msg_id": int(item.get("msg_id", 0)),
+                "user_id": int(item.get("user_id", 0)),
+                "user_name": item.get("user_name", "unknown"),
+                "text": item.get("text", ""),
+                "ts": int(item.get("ts", 0)),
+            }
+            for item in response.get("Items", [])
+        ]
+        return rows, response.get("LastEvaluatedKey")
+
+    def save_memory_snapshot(self, chat_id, snapshot):
+        item = {
+            "pk": _chat_pk(chat_id),
+            "sk": _memory_sk(snapshot["start_ts"], snapshot["end_ts"]),
+            **snapshot,
+        }
+        self.table.put_item(Item=item)
+
+    def search_memories(
+        self, chat_id, query="", limit=5, scan_limit=50, start_ts=None, end_ts=None
+    ):
+        limit = int(limit)
+        scan_limit = int(scan_limit)
+        if limit < 1 or scan_limit < 1:
+            raise ValueError("memory limits must be positive")
+        response = self.table.query(
+            KeyConditionExpression="pk = :pk AND begins_with(sk, :prefix)",
+            ExpressionAttributeValues={
+                ":pk": _chat_pk(chat_id),
+                ":prefix": "MEMORY#",
+            },
+            ScanIndexForward=False,
+            Limit=scan_limit,
+        )
+        memories = []
+        for item in response.get("Items", []):
+            memory = dict(item)
+            memory.pop("pk", None)
+            memory.pop("sk", None)
+            if start_ts is not None and int(memory.get("end_ts", 0)) < int(start_ts):
+                continue
+            if end_ts is not None and int(memory.get("start_ts", 0)) > int(end_ts):
+                continue
+            memories.append(memory)
+        return rank_memory_snapshots(memories, query, limit)
 
     def get_settings(self, chat_id):
         settings = dict(config.DEFAULTS)
@@ -185,11 +280,12 @@ class DynamoDBStorage:
             "output_tokens": int(usage.get("output_tokens", 0)),
             "total_tokens": int(usage.get("total_tokens", 0)),
             "estimated": bool(usage.get("estimated", True)),
+            "provider": usage.get("provider", ""),
             "model": usage.get("model", ""),
         }
         self.table.put_item(Item=item)
 
-    def usage_totals(self, chat_id, since_ts=None):
+    def usage_totals(self, chat_id, since_ts=None, provider=None, model=None):
         totals = {
             "requests": 0,
             "messages_count": 0,
@@ -212,6 +308,10 @@ class DynamoDBStorage:
                 ts = int(item["sk"].removeprefix("USAGE#").split("#", 1)[0])
                 if since_ts is not None and ts < int(since_ts):
                     continue
+                if provider is not None and item.get("provider", "") != provider:
+                    continue
+                if model is not None and item.get("model", "") != model:
+                    continue
                 totals["requests"] += 1
                 totals["messages_count"] += int(item.get("messages_count", 0))
                 totals["input_tokens"] += int(item.get("input_tokens", 0))
@@ -223,3 +323,22 @@ class DynamoDBStorage:
                 break
             kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         return totals
+
+    def quota_warning_sent(self, chat_id, provider, day):
+        response = self.table.get_item(
+            Key={"pk": _chat_pk(chat_id), "sk": _quota_warning_sk(provider, day)}
+        )
+        return "Item" in response
+
+    def mark_quota_warning_sent(self, chat_id, provider, day, ts=None):
+        ts = int(time.time() if ts is None else ts)
+        self.table.put_item(
+            Item={
+                "pk": _chat_pk(chat_id),
+                "sk": _quota_warning_sk(provider, day),
+                "provider": provider,
+                "day": day,
+                "ts": ts,
+                "expires_at": ts + 14 * 86400,
+            }
+        )

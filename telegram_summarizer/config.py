@@ -61,8 +61,12 @@ DB_PATH = os.environ.get("DB_PATH", "data/bot.db")
 APP_SECRET_ID = os.environ.get("APP_SECRET_ID", "")
 TELEGRAM_TOKEN = _secret_or_env("TELEGRAM_TOKEN")
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "gemini")
+DEFAULT_LLM_PROVIDER = os.environ.get("DEFAULT_LLM_PROVIDER", LLM_BACKEND)
+DEFAULT_LLM_MODEL = os.environ.get("DEFAULT_LLM_MODEL", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 GEMINI_API_KEY = _secret_or_env("GEMINI_API_KEY")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_API_KEY = _secret_or_env("GROQ_API_KEY")
 TELEGRAM_WEBHOOK_SECRET = _secret_or_env("TELEGRAM_WEBHOOK_SECRET")
 DDB_TABLE_NAME = os.environ.get("DDB_TABLE_NAME", "")
 QUEUE_URL = os.environ.get("QUEUE_URL", "")
@@ -70,14 +74,28 @@ MESSAGE_TTL_DAYS = _int_env("MESSAGE_TTL_DAYS", 365)
 BOT_OWNER_IDS = _int_set_env("BOT_OWNER_IDS")
 MAX_INPUT_TOKENS = _int_env("MAX_INPUT_TOKENS", 25000)
 SUMMARY_OUTPUT_TOKENS = _int_env("SUMMARY_OUTPUT_TOKENS", 1500)
+ASK_OUTPUT_TOKENS = _int_env("ASK_OUTPUT_TOKENS", 500)
+MEMORY_OUTPUT_TOKENS = _int_env("MEMORY_OUTPUT_TOKENS", 1000)
+MEMORY_MAX_MESSAGES = _int_env("MEMORY_MAX_MESSAGES", 500)
 SUMMARY_MAX_MESSAGES = _int_env("SUMMARY_MAX_MESSAGES", 5000)
+LLM_REQUEST_TIMEOUT_SECONDS = _int_env("LLM_REQUEST_TIMEOUT_SECONDS", 45)
+GEMINI_DAILY_TOKEN_QUOTA = _int_env("GEMINI_DAILY_TOKEN_QUOTA", 0)
+GROQ_DAILY_TOKEN_QUOTA = _int_env("GROQ_DAILY_TOKEN_QUOTA", 0)
+QUOTA_WARNING_REMAINING_PERCENT = _int_env("QUOTA_WARNING_REMAINING_PERCENT", 10)
 
 DEFAULT_COUNT = 30
 MAX_COUNT = SUMMARY_MAX_MESSAGES
 DISK_HEADROOM = 0.10  # keep at least 10% of the volume free
 
+DAILY_TOKEN_QUOTAS = {
+    "gemini": GEMINI_DAILY_TOKEN_QUOTA,
+    "groq": GROQ_DAILY_TOKEN_QUOTA,
+}
+
 DEFAULTS = {
     "style": "concise, neutral bullet points",
     "filter_level": "clean",
     "language": "auto",
+    "provider": DEFAULT_LLM_PROVIDER,
+    "model": DEFAULT_LLM_MODEL,
 }

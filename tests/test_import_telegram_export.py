@@ -76,6 +76,60 @@ def test_load_importable_messages_filters_export(tmp_path):
     assert messages[0]["text"] == "kept"
 
 
+def test_load_s3_importable_messages_uses_offline_aws_cli_source():
+    calls = []
+    export = {
+        "messages": [
+            {
+                "id": 2,
+                "type": "message",
+                "date_unixtime": "1710000002",
+                "from": "Alice",
+                "from_id": "user123",
+                "text": "from s3",
+            }
+        ]
+    }
+
+    def fake_run(command, check, capture_output, text):
+        calls.append(command)
+
+        class Result:
+            returncode = 0
+            stdout = json.dumps(export)
+            stderr = ""
+
+        return Result()
+
+    messages = importer.load_s3_importable_messages(
+        "s3://private-chat/result.json",
+        "eu-central-1",
+        command_runner=fake_run,
+    )
+
+    assert messages[0]["text"] == "from s3"
+    assert calls == [
+        [
+            "aws",
+            "s3",
+            "cp",
+            "s3://private-chat/result.json",
+            "-",
+            "--region",
+            "eu-central-1",
+        ]
+    ]
+
+
+def test_load_s3_importable_messages_rejects_non_s3_source():
+    try:
+        importer.load_s3_importable_messages("/tmp/result.json", "eu-central-1")
+    except ValueError as exc:
+        assert "s3://" in str(exc)
+    else:
+        raise AssertionError("non-S3 source should be rejected")
+
+
 def test_select_messages_can_skip_latest_before_limit():
     messages = [{"msg_id": index} for index in range(10)]
 

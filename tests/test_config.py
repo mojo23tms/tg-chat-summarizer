@@ -8,10 +8,25 @@ def test_defaults_present():
     assert config.MESSAGE_TTL_DAYS == 365
     assert config.MAX_INPUT_TOKENS == 25000
     assert config.SUMMARY_OUTPUT_TOKENS == 1500
+    assert config.ASK_OUTPUT_TOKENS == 500
+    assert config.MEMORY_OUTPUT_TOKENS == 1000
+    assert config.MEMORY_MAX_MESSAGES == 500
+    assert config.GEMINI_DAILY_TOKEN_QUOTA == 0
+    assert config.GROQ_DAILY_TOKEN_QUOTA == 0
+    assert config.QUOTA_WARNING_REMAINING_PERCENT == 10
+    assert config.DAILY_TOKEN_QUOTAS == {"gemini": 0, "groq": 0}
     assert config.DISK_HEADROOM == 0.10
-    assert set(config.DEFAULTS) == {"style", "filter_level", "language"}
+    assert set(config.DEFAULTS) == {
+        "style",
+        "filter_level",
+        "language",
+        "provider",
+        "model",
+    }
     assert config.DEFAULTS["filter_level"] == "clean"
     assert config.DEFAULTS["language"] == "auto"
+    assert config.DEFAULTS["provider"] == "gemini"
+    assert config.DEFAULTS["model"] == ""
 
 
 def test_int_env_parsing(monkeypatch):

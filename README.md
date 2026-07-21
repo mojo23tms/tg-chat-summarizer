@@ -1,7 +1,7 @@
 # Telegram Summarizer Bot
 
 AWS-first Telegram bot that records chat messages and summarizes recent history
-with Gemini. Production runs on API Gateway, Lambda, SQS FIFO, and DynamoDB
+with Gemini or Groq. Production runs on API Gateway, Lambda, SQS FIFO, and DynamoDB
 through AWS SAM. A legacy local/Fly.io long-polling mode is still available for
 development and rollback.
 
@@ -11,10 +11,17 @@ development and rollback.
 - Stores normal text messages per chat in DynamoDB.
 - Summarizes recent chat history from inline buttons, with `/summarize`,
   `/summarize N`, and `/summarize auto` kept as fallbacks.
+- Answers evidence-grounded questions about bounded chat history with `/ask`.
+- Stores compact friend-chat lore snapshots with admin-only `/remember` and
+  uses relevant memories in `/ask`.
+- Answers direct non-history questions with `/chat`.
 - Replies with Telegram HTML formatting.
 - Tracks estimated or provider-reported token usage.
 - Lets configured bot owners manage group settings from direct messages.
-- Imports Telegram Desktop JSON history into DynamoDB.
+- Imports Telegram Desktop JSON history from a local file or offline S3 source
+  into DynamoDB.
+- Provides bounded chat-scoped retrieval primitives for future history-aware
+  commands.
 
 ## Documentation Map
 
@@ -39,7 +46,8 @@ development and rollback.
   - DynamoDB on-demand with TTL
   - Secrets Manager
   - CloudWatch Logs
-- LLM: Gemini via `google-generativeai`
+- LLM: Gemini via `google-generativeai`; Groq via its OpenAI-compatible Chat
+  Completions API
 - Telegram API:
   - webhook ingestion from Telegram
   - direct Bot API calls for replies/admin checks
@@ -55,14 +63,16 @@ telegram_summarizer/
   dynamodb_storage.py   DynamoDB adapter
   handlers.py           legacy local/Fly long-polling handlers
   helpers.py            parsing, escaping, Telegram HTML sanitizer
-  llm.py                Gemini prompting, token estimates, usage metadata
+  history_qa.py         shared bounded history Q&A orchestration
+  llm.py                LLM prompting, provider adapters, usage metadata
+  memory.py             structured low-cost memory generation
   main.py               legacy local/Fly polling entrypoint
   storage.py            SQLite adapter for legacy local/Fly mode
   telegram_api.py       small Telegram Bot API client
 
 scripts/
   set_webhook.py            register Telegram webhook
-  import_telegram_export.py import Telegram Desktop JSON history
+  import_telegram_export.py import local/S3 Telegram Desktop JSON history
 
 tests/                  offline pytest suite
 docs/                   current project documentation
@@ -81,7 +91,14 @@ MessageTtlDays           default 365
 BotOwnerIds              comma-separated Telegram user ids, optional
 MaxInputTokens           default 25000
 SummaryOutputTokens      default 1500
+AskOutputTokens          default 500
+MemoryOutputTokens       default 1000
+MemoryMaxMessages        default 500
 SummaryMaxMessages       default 5000
+LlmRequestTimeoutSeconds default 45
+GeminiDailyTokenQuota    default 0, disabled
+GroqDailyTokenQuota      default 0, disabled
+QuotaWarningRemainingPercent default 10
 ```
 
 Runtime environment variables used by Lambda:
@@ -94,8 +111,19 @@ MESSAGE_TTL_DAYS=365
 BOT_OWNER_IDS=
 MAX_INPUT_TOKENS=25000
 SUMMARY_OUTPUT_TOKENS=1500
+ASK_OUTPUT_TOKENS=500
+MEMORY_OUTPUT_TOKENS=1000
+MEMORY_MAX_MESSAGES=500
 SUMMARY_MAX_MESSAGES=5000
+LLM_REQUEST_TIMEOUT_SECONDS=45
+GEMINI_DAILY_TOKEN_QUOTA=0
+GROQ_DAILY_TOKEN_QUOTA=0
+QUOTA_WARNING_REMAINING_PERCENT=10
 LLM_BACKEND=gemini
+DEFAULT_LLM_PROVIDER=gemini
+DEFAULT_LLM_MODEL=
+GEMINI_MODEL=gemini-flash-latest
+GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
 `APP_SECRET_ID` must point to a JSON secret containing:
@@ -104,6 +132,7 @@ LLM_BACKEND=gemini
 {
   "TELEGRAM_TOKEN": "...",
   "GEMINI_API_KEY": "...",
+  "GROQ_API_KEY": "...",
   "TELEGRAM_WEBHOOK_SECRET": "..."
 }
 ```
@@ -123,11 +152,12 @@ LLM_BACKEND=gemini
    ```bash
    export TELEGRAM_TOKEN="..."
    export GEMINI_API_KEY="..."
+   export GROQ_API_KEY="..."
    export TELEGRAM_WEBHOOK_SECRET="$(openssl rand -hex 32)"
 
    DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws secretsmanager put-secret-value \
      --secret-id telegram-summarizer/prod \
-     --secret-string "{\"TELEGRAM_TOKEN\":\"$TELEGRAM_TOKEN\",\"GEMINI_API_KEY\":\"$GEMINI_API_KEY\",\"TELEGRAM_WEBHOOK_SECRET\":\"$TELEGRAM_WEBHOOK_SECRET\"}" \
+     --secret-string "{\"TELEGRAM_TOKEN\":\"$TELEGRAM_TOKEN\",\"GEMINI_API_KEY\":\"$GEMINI_API_KEY\",\"GROQ_API_KEY\":\"$GROQ_API_KEY\",\"TELEGRAM_WEBHOOK_SECRET\":\"$TELEGRAM_WEBHOOK_SECRET\"}" \
      --region eu-central-1
    ```
 
@@ -156,7 +186,8 @@ LLM_BACKEND=gemini
        BotOwnerIds="" \
        MaxInputTokens=25000 \
        SummaryOutputTokens=1500 \
-       SummaryMaxMessages=5000
+       SummaryMaxMessages=5000 \
+       LlmRequestTimeoutSeconds=45
    ```
 
 5. Register Telegram webhook:
@@ -179,6 +210,7 @@ LLM_BACKEND=gemini
    /menu
    /whoami
    normal test message
+   /chat write a one-line roast about slow deploys
    tap Summarize
    tap Usage
    ```
@@ -196,7 +228,8 @@ LLM_BACKEND=gemini
        BotOwnerIds="YOUR_TELEGRAM_USER_ID" \
        MaxInputTokens=25000 \
        SummaryOutputTokens=1500 \
-       SummaryMaxMessages=5000
+       SummaryMaxMessages=5000 \
+       LlmRequestTimeoutSeconds=45
    ```
 
 ## Daily Workflow
@@ -227,23 +260,40 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam logs \
 
 ## Bot Menu And Commands
 
-In AWS production, `/start`, `/help`, and `/menu` open the inline button menu.
-Use the menu to summarize, inspect usage, view settings, and change settings.
-Slash commands remain available as a fallback:
+`/start`, `/help`, and `/menu` install a persistent reply keyboard below the
+Telegram text field. Commands that need free text ask for it in the next
+message. The older AWS inline settings callbacks remain compatible. Slash
+commands remain available as a fallback:
 
 ```text
-/menu                    open the inline button menu
+/menu                    show or restore the persistent button menu
+/ask <question>          answer from bounded current-chat history evidence
+/remember [N|auto]       admin: store compact lore, max 500 source messages
+/chat <question>         ask a general question; does not search chat history
 /summarize [N|auto]       summarize latest messages; manual max is 5000
+/lore                    established lore and canon
+/insidejoke <term>       explain a recurring reference
+/bestof [period]         memorable moments; defaults to month
+/quotes [user]           evidence-backed group or person quotes
+/recap [period]          recap today/week/month/year/all; defaults to month
+/help or /start           show current commands and buttons
 /settings                 show settings for current or selected chat
 /setstyle <text>          set summary style; admins or owner DM
 /setfilter off|clean|strict
 /setlang <code|auto>
+/models                  list available LLM providers and starter models
+/setprovider gemini|groq set provider; admins or owner DM
+/setmodel <model|provider:model>
 /usage [today|month]      show token usage records
 /whoami                   show your user id and chat id
 /chats                    owner DM: list known chat ids
 /usechat <chat_id>        owner DM: select target chat
-/help or /start           open the inline button menu
 ```
+
+Daily provider token quotas are optional. Set `GEMINI_DAILY_TOKEN_QUOTA` and/or
+`GROQ_DAILY_TOKEN_QUOTA` to a positive value to warn each chat once per provider
+per UTC day when remaining tokens are at or below
+`QUOTA_WARNING_REMAINING_PERCENT`.
 
 ## Important Operational Rules
 
@@ -252,13 +302,20 @@ Slash commands remain available as a fallback:
 - For group chats, disable BotFather privacy mode or make the bot a group admin,
   otherwise normal messages may not reach the bot.
 - Telegram cannot provide old history through the Bot API. Use Telegram Desktop
-  JSON export plus `scripts/import_telegram_export.py`.
+  JSON export plus `scripts/import_telegram_export.py`; `--s3-uri` is supported
+  for offline backfill.
+- Runtime history retrieval reads bounded DynamoDB pages. Lambda never reads S3
+  in the Telegram request path.
+- `/ask` searches only the current chat, combines bounded raw evidence with
+  relevant compact memory snapshots, and reports when evidence is missing.
+- `/remember` is an explicit admin-only LLM operation; snapshots are not
+  generated silently, keeping quota spend predictable.
 - DynamoDB TTL is eventual. `MESSAGE_TTL_DAYS=365` controls expiration metadata,
   not exact deletion time.
 - The bot maintains a lightweight DynamoDB `CHATS` index for owner chat
   discovery. Imported history also updates this index.
-- Tests intentionally block external network calls to protect Telegram, Gemini,
-  AWS, and free-tier quota.
+- Tests intentionally block external network calls to protect Telegram, LLM
+  providers, AWS, and free-tier quota.
 
 ## Local Legacy Mode
 
@@ -267,6 +324,7 @@ Use local long polling only for development or rollback:
 ```bash
 export TELEGRAM_TOKEN="..."
 export GEMINI_API_KEY="..."
+export GROQ_API_KEY="..."
 export DB_PATH=data/bot.db
 .venv/bin/python -m telegram_summarizer.main
 ```

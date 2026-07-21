@@ -19,8 +19,9 @@ def test_gemini_backend_uses_current_model_not_retired(monkeypatch):
         def __init__(self, name):
             captured["model"] = name
 
-        def generate_content(self, prompt):
+        def generate_content(self, prompt, request_options=None):
             captured["prompt"] = prompt
+            captured["request_options"] = request_options
             return types.SimpleNamespace(text="  a summary  ")
 
     fake.configure = configure
@@ -33,4 +34,5 @@ def test_gemini_backend_uses_current_model_not_retired(monkeypatch):
 
     assert captured["model"] == llm.GEMINI_MODEL
     assert captured["model"] != "gemini-1.5-flash"
+    assert captured["request_options"] == {"timeout": 45}
     assert out == "a summary"  # response text is stripped

@@ -2,6 +2,24 @@
 
 This roadmap should be implemented batch by batch. Do not combine unrelated batches into one large refactor.
 
+## Testing And LLM Quota Discipline
+
+Testing is a roadmap-wide requirement, not a separate final batch.
+
+- Expand automated coverage in every batch, including touched behavior,
+  adjacent regression risks, failure paths, and compatibility boundaries.
+- Cover as much of the codebase as practical with deterministic offline tests.
+- Keep routine and CI test suites free of real Telegram, AWS, Gemini, Groq, or
+  other provider network calls.
+- Test LLM prompts, routing, usage parsing, timeouts, blocked responses, quota
+  behavior, and provider failures with injected backends and fake responses.
+- Never require real provider credentials for automated tests.
+- Use a real LLM smoke test only when provider integration cannot be validated
+  offline, after all offline tests pass. Keep it to the smallest useful prompt
+  and record that quota-consuming verification separately.
+- Prefer meaningful behavior and failure-path coverage over low-value tests
+  written only to increase a coverage percentage.
+
 ## Batch 0: Architecture Review
 
 Inspect current AWS webhook, SQS worker, DynamoDB storage, summarization flow, LLM code, Telegram HTML handling, tests, cost risks, and refactor risks. Produce a short implementation plan before coding.
@@ -117,6 +135,8 @@ Store snapshots in DynamoDB and allow `/ask` to use relevant memories plus raw m
 
 ## Batch 10: Lore Commands
 
+Status: implemented with bounded raw-history and memory retrieval.
+
 Add commands only if they fit cleanly after memory snapshots.
 
 Candidates:
@@ -129,7 +149,61 @@ Candidates:
 
 Each command must use memory/retrieval and avoid huge scans.
 
-## Batch 11: Personal Cloud Archive
+## Batch 11: Historical Memory Backfill And Cheap Archive Retrieval
+
+Make a full imported chat archive convenient to use without increasing live
+prompt size or putting S3 in the Telegram request path.
+
+Requirements:
+
+- add an offline, resumable job that reads chat-scoped messages from DynamoDB
+  in chronological chunks after the existing S3-to-DynamoDB import;
+- checkpoint progress per chat so interrupted runs resume safely and completed
+  source ranges are not charged twice;
+- generate compact memory snapshots for historical ranges, preserving source
+  timestamps, message ids, participants, keywords, quotes, jokes, and lore;
+- make chunk size, maximum processed messages, provider, model, and output-token
+  budget explicit operator settings;
+- support dry-run mode with projected chunk count and token/cost estimates before
+  any provider calls;
+- keep runtime `/ask` and lore commands bounded: retrieve a small set of memory
+  candidates, fetch only their supporting raw ranges, and send only selected
+  evidence to the LLM;
+- add deterministic lexical metadata/indexing first so old memories can be found
+  without scanning only the newest DynamoDB slice;
+- evaluate semantic retrieval only after lexical-plus-memory retrieval is
+  measured; if needed, embed memory/chunk records first rather than every raw
+  Telegram message;
+- update new-message processing incrementally so the historical backfill is a
+  one-time operation rather than a recurring full-archive job;
+- preserve chat-id isolation, source traceability, idempotency, DynamoDB/SAM
+  compatibility, and legacy local-mode behavior;
+- provide hard per-run and per-command cost guards, provider usage logging,
+  quota warnings, and clear failure/resume reporting.
+
+Tests must remain offline and cover:
+
+- chronological chunk boundaries with no gaps or overlaps;
+- checkpoint resume and idempotent reruns;
+- chat isolation and bounded maximum-message processing;
+- dry-run estimates without LLM calls;
+- provider failure followed by safe resume;
+- retrieval of old evidence outside the newest raw-message scan window;
+- token/evidence caps in the final live request;
+- lexical fallback when embeddings are absent or unavailable.
+
+Acceptance criteria:
+
+- a roughly 50,000-message imported chat can be backfilled through an explicit
+  operator command without loading the whole export or history into memory;
+- live commands never read S3 and never send the full archive to an LLM;
+- repeated backfills process only missing or explicitly requested ranges;
+- ordinary `/ask` and lore requests require at most one bounded answer-generation
+  LLM call after retrieval;
+- documentation includes setup, dry run, resume, expected cost inputs, privacy,
+  and rollback instructions.
+
+## Batch 12: Personal Cloud Archive
 
 Evaluate and implement only useful archival integration.
 
@@ -137,7 +211,7 @@ Google Drive is for readable archives, digests, JSON exports, and manual browsin
 
 Cloud storage must never be in the live Telegram request path.
 
-## Batch 12: Final Documentation and Review
+## Batch 13: Final Documentation and Review
 
 Update docs for commands, providers, quotas, memory, cloud archive, cost control, privacy, and deployment.
 

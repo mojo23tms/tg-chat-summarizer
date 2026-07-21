@@ -10,6 +10,7 @@ and rolling back the AWS bot.
 - AWS SAM CLI
 - Telegram bot token from BotFather
 - Gemini API key
+- Groq API key, optional
 - AWS Secrets Manager secret for production credentials
 - Region: `eu-central-1`
 
@@ -34,6 +35,7 @@ Create local shell values for the first secret write:
 ```bash
 export TELEGRAM_TOKEN="..."
 export GEMINI_API_KEY="..."
+export GROQ_API_KEY="..."
 export TELEGRAM_WEBHOOK_SECRET="$(openssl rand -hex 32)"
 ```
 
@@ -42,7 +44,7 @@ Store them in Secrets Manager:
 ```bash
 DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws secretsmanager create-secret \
   --name telegram-summarizer/prod \
-  --secret-string "{\"TELEGRAM_TOKEN\":\"$TELEGRAM_TOKEN\",\"GEMINI_API_KEY\":\"$GEMINI_API_KEY\",\"TELEGRAM_WEBHOOK_SECRET\":\"$TELEGRAM_WEBHOOK_SECRET\"}" \
+  --secret-string "{\"TELEGRAM_TOKEN\":\"$TELEGRAM_TOKEN\",\"GEMINI_API_KEY\":\"$GEMINI_API_KEY\",\"GROQ_API_KEY\":\"$GROQ_API_KEY\",\"TELEGRAM_WEBHOOK_SECRET\":\"$TELEGRAM_WEBHOOK_SECRET\"}" \
   --region eu-central-1
 ```
 
@@ -75,8 +77,12 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy \
     MessageTtlDays=365 \
     BotOwnerIds="" \
     MaxInputTokens=25000 \
+    AskOutputTokens=500 \
+    MemoryOutputTokens=1000 \
+    MemoryMaxMessages=500 \
     SummaryOutputTokens=1500 \
-    SummaryMaxMessages=5000
+    SummaryMaxMessages=5000 \
+    LlmRequestTimeoutSeconds=45
 ```
 
 If SAM rejects a `Name=` override, check that the parameter value is not empty.
@@ -141,8 +147,12 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy \
     MessageTtlDays=365 \
     BotOwnerIds="YOUR_USER_ID" \
     MaxInputTokens=25000 \
+    AskOutputTokens=500 \
+    MemoryOutputTokens=1000 \
+    MemoryMaxMessages=500 \
     SummaryOutputTokens=1500 \
-    SummaryMaxMessages=5000
+    SummaryMaxMessages=5000 \
+    LlmRequestTimeoutSeconds=45
 ```
 
 Then in a DM with the bot:
@@ -169,10 +179,23 @@ After deploy, verify:
 
 ```text
 /help
+/chat say hello in one short sentence
 /summarize
 /summarize auto
 /usage
 ```
+
+Optional free-tier quota warnings:
+
+```bash
+GEMINI_DAILY_TOKEN_QUOTA=0
+GROQ_DAILY_TOKEN_QUOTA=0
+QUOTA_WARNING_REMAINING_PERCENT=10
+```
+
+Leave quotas at `0` to disable warnings. Set a positive provider token quota to
+warn each chat once per provider per UTC day when remaining daily tokens are at
+or below the configured percentage.
 
 ## Logs
 
@@ -341,6 +364,7 @@ Run local polling:
 ```bash
 export TELEGRAM_TOKEN="..."
 export GEMINI_API_KEY="..."
+export GROQ_API_KEY="..."
 export DB_PATH=data/bot.db
 .venv/bin/python -m telegram_summarizer.main
 ```

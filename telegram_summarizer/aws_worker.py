@@ -1,12 +1,17 @@
 import json
 import logging
 import time
+from datetime import datetime, timezone
 
 from telegram.constants import ParseMode
 
+from . import bot_menu
 from . import config
 from . import helpers
+from . import history_qa
 from . import llm
+from . import lore
+from . import memory
 from .dynamodb_storage import DynamoDBStorage
 from .handlers import PROFANITY_WORDLIST, VALID_FILTERS, is_setting_change_allowed
 from .telegram_api import TelegramApi, TelegramApiError
@@ -66,20 +71,20 @@ def _keyboard(rows):
 
 def _main_menu_markup(is_owner_dm=False):
     rows = [
-        [_button("Summarize", "menu:summarize"), _button("Settings", "settings:view")],
-        [_button("Usage", "usage:all"), _button("Help", "menu:help")],
+        [_button("📝 Summarize", "menu:summarize"), _button("⚙️ Settings", "settings:view")],
+        [_button("📊 Usage", "usage:all"), _button("❓ Help", "menu:help")],
     ]
     if is_owner_dm:
-        rows.append([_button("Chats", "owner:chats")])
+        rows.append([_button("💬 Chats", "owner:chats")])
     return _keyboard(rows)
 
 
 def _summarize_menu_markup():
     return _keyboard(
         [
-            [_button("Last 30", "sum:30"), _button("Last 100", "sum:100")],
-            [_button("Last 200", "sum:200"), _button("Auto", "sum:auto")],
-            [_button("Back", "menu:home")],
+            [_button("🕘 Last 30", "sum:30"), _button("📚 Last 100", "sum:100")],
+            [_button("🧾 Last 200", "sum:200"), _button("🎯 Auto", "sum:auto")],
+            [_button("⬅️ Back", "menu:home")],
         ]
     )
 
@@ -88,23 +93,23 @@ def _settings_menu_markup():
     return _keyboard(
         [
             [
-                _button("Filter off", "settings:filter:off"),
-                _button("Clean", "settings:filter:clean"),
-                _button("Strict", "settings:filter:strict"),
+                _button("🚫 Filter off", "settings:filter:off"),
+                _button("🧼 Clean", "settings:filter:clean"),
+                _button("🔒 Strict", "settings:filter:strict"),
             ],
             [
-                _button("Brief", "settings:style:brief"),
-                _button("Concise", "settings:style:concise"),
-                _button("Detailed", "settings:style:detailed"),
+                _button("⚡ Brief", "settings:style:brief"),
+                _button("✅ Concise", "settings:style:concise"),
+                _button("🔍 Detailed", "settings:style:detailed"),
             ],
-            [_button("Custom style", "settings:style:custom")],
+            [_button("✍️ Custom style", "settings:style:custom")],
             [
-                _button("Auto lang", "settings:lang:auto"),
-                _button("English", "settings:lang:en"),
-                _button("Ukrainian", "settings:lang:uk"),
+                _button("🌐 Auto lang", "settings:lang:auto"),
+                _button("🇬🇧 English", "settings:lang:en"),
+                _button("🇺🇦 Ukrainian", "settings:lang:uk"),
             ],
-            [_button("Custom language", "settings:lang:custom")],
-            [_button("Back", "menu:home")],
+            [_button("🗣️ Custom language", "settings:lang:custom")],
+            [_button("⬅️ Back", "menu:home")],
         ]
     )
 
@@ -113,18 +118,18 @@ def _usage_menu_markup():
     return _keyboard(
         [
             [
-                _button("Today", "usage:today"),
-                _button("Month", "usage:month"),
-                _button("All", "usage:all"),
+                _button("📅 Today", "usage:today"),
+                _button("🗓️ Month", "usage:month"),
+                _button("♾️ All", "usage:all"),
             ],
-            [_button("Back", "menu:home")],
+            [_button("⬅️ Back", "menu:home")],
         ]
     )
 
 
 def _owner_chats_markup(chat_ids):
     rows = [[_button(str(chat_id), f"owner:chat:{chat_id}")] for chat_id in chat_ids]
-    rows.append([_button("Back", "menu:home")])
+    rows.append([_button("⬅️ Back", "menu:home")])
     return _keyboard(rows)
 
 
@@ -153,13 +158,20 @@ def _render_home(storage, telegram, message, message_id=None):
         active = storage.get_owner_active_chat(_user(message).get("id"))
         if active is not None:
             text = f"Menu\nactive chat: {active}"
-    _send_menu(
-        telegram,
-        _chat_id(message),
-        text,
-        _main_menu_markup(is_owner_dm=_is_owner_dm(message)),
-        message_id=message_id,
-    )
+    if message_id:
+        _send_menu(
+            telegram,
+            _chat_id(message),
+            text,
+            _main_menu_markup(is_owner_dm=_is_owner_dm(message)),
+            message_id=message_id,
+        )
+    else:
+        telegram.send_message(
+            _chat_id(message),
+            text,
+            reply_markup=bot_menu.reply_markup(is_owner_dm=_is_owner_dm(message)),
+        )
 
 
 def _render_summarize_menu(telegram, message, message_id=None):
@@ -176,12 +188,15 @@ def _settings_text(storage, message):
     chat_id = _chat_id(message)
     target_chat_id = _control_target_chat(storage, message)
     settings = storage.get_settings(target_chat_id)
+    provider, model = llm.resolve_provider_model(settings)
     prefix = f"chat: {target_chat_id}\n" if target_chat_id != chat_id else ""
     return (
         f"{prefix}"
         f"style: {settings['style']}\n"
         f"filter: {settings['filter_level']}\n"
-        f"language: {settings['language']}"
+        f"language: {settings['language']}\n"
+        f"provider: {provider}\n"
+        f"model: {model}"
     )
 
 
@@ -216,13 +231,20 @@ def _usage_text(storage, message, period, now_fn):
         f"chat: {target_chat_id}\n"
         f"period: {period}\n"
         f"requests: {totals['requests']}\n"
-        f"messages summarized: {totals['messages_count']}\n"
+        f"source messages processed: {totals['messages_count']}\n"
         f"input tokens: {totals['input_tokens']}\n"
         f"output tokens: {totals['output_tokens']}\n"
         f"total tokens: {totals['total_tokens']}\n"
         f"auto budget: {config.MAX_INPUT_TOKENS - config.SUMMARY_OUTPUT_TOKENS} "
         f"input tokens{estimated_note}"
     )
+
+
+def _help_text(storage, message):
+    target_chat_id = _control_target_chat(storage, message)
+    settings = storage.get_settings(target_chat_id)
+    active_chat_id = target_chat_id if target_chat_id != _chat_id(message) else None
+    return bot_menu.manual(settings, active_chat_id=active_chat_id)
 
 
 def _render_usage_menu(storage, telegram, message, period, now_fn, message_id=None):
@@ -236,13 +258,21 @@ def _render_usage_menu(storage, telegram, message, period, now_fn, message_id=No
 
 
 def _render_help_menu(storage, telegram, message, message_id=None):
-    _send_menu(
-        telegram,
-        _chat_id(message),
-        "Use the buttons below, or keep using slash commands as a fallback.",
-        _main_menu_markup(is_owner_dm=_is_owner_dm(message)),
-        message_id=message_id,
-    )
+    if message_id:
+        telegram.edit_message_text(
+            _chat_id(message),
+            message_id,
+            _help_text(storage, message),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_main_menu_markup(is_owner_dm=_is_owner_dm(message)),
+        )
+    else:
+        telegram.send_message(
+            _chat_id(message),
+            _help_text(storage, message),
+            parse_mode=ParseMode.HTML,
+            reply_markup=bot_menu.reply_markup(is_owner_dm=_is_owner_dm(message)),
+        )
 
 
 def _render_owner_chats(storage, telegram, message, message_id=None):
@@ -303,6 +333,47 @@ def _send_ai_html_response(telegram, chat_id, text):
         telegram.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
 
 
+def _utc_day(ts):
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def _day_start_ts(ts):
+    dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+    return int(datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc).timestamp())
+
+
+def _maybe_send_quota_warning(storage, telegram, chat_id, usage, now):
+    if not usage:
+        return
+    provider = usage.get("provider") or ""
+    quota = config.DAILY_TOKEN_QUOTAS.get(provider, 0)
+    if quota <= 0:
+        return
+    day = _utc_day(now)
+    if hasattr(storage, "quota_warning_sent") and storage.quota_warning_sent(
+        chat_id, provider, day
+    ):
+        return
+    totals = storage.usage_totals(
+        chat_id,
+        since_ts=_day_start_ts(now),
+        provider=provider,
+        model=usage.get("model") or None,
+    )
+    used = int(totals["total_tokens"])
+    remaining = max(0, quota - used)
+    threshold = max(1, int(quota * config.QUOTA_WARNING_REMAINING_PERCENT / 100))
+    if remaining > threshold:
+        return
+    if hasattr(storage, "mark_quota_warning_sent"):
+        storage.mark_quota_warning_sent(chat_id, provider, day, ts=int(now))
+    telegram.send_message(
+        chat_id,
+        f"Quota warning: {provider} has about {remaining} of {quota} daily "
+        f"tokens remaining for {usage.get('model') or 'the selected model'}.",
+    )
+
+
 def _is_admin(telegram, message, user_id):
     if _chat_type(message) == "private":
         return True
@@ -330,7 +401,33 @@ def _summary_result(messages, settings, summarize_fn):
     if isinstance(result, dict):
         return result
     prompt = llm.build_prompt(messages, settings)
-    return {"text": result, "usage": llm.estimate_usage(prompt, result)}
+    provider, model = llm.resolve_provider_model(settings)
+    return {
+        "text": result,
+        "provider": provider,
+        "model": model,
+        "usage": llm.estimate_usage(prompt, result, provider, model),
+        "usage_estimated": True,
+        "finish_reason": None,
+    }
+
+
+def _chat_result(question, settings, chat_fn):
+    if chat_fn is None:
+        return llm.chat_with_usage(question, settings)
+    result = chat_fn(question, settings)
+    if isinstance(result, dict):
+        return result
+    prompt = llm.build_chat_prompt(question, settings)
+    provider, model = llm.resolve_provider_model(settings)
+    return {
+        "text": result,
+        "provider": provider,
+        "model": model,
+        "usage": llm.estimate_usage(prompt, result, provider, model),
+        "usage_estimated": True,
+        "finish_reason": None,
+    }
 
 
 def _summarize_with_block_fallback(msgs, settings, summarize_fn):
@@ -371,7 +468,7 @@ def _handle_summarize(storage, telegram, message, args, summarize_fn, now_fn):
         logger.warning("summary prompt blocked and no smaller fallback is available")
         telegram.send_message(
             chat_id,
-            "Gemini blocked this summary request because the selected messages "
+            "The selected model blocked this summary request because the messages "
             "triggered safety filters. Try /summarize with fewer messages.",
         )
         return
@@ -381,13 +478,15 @@ def _handle_summarize(storage, telegram, message, args, summarize_fn, now_fn):
             chat_id, "Sorry, the summarizer is unavailable right now. Please try again."
         )
         return
-    storage.log_usage(chat_id, result.get("usage"), len(msgs), ts=int(now_fn()))
+    now = int(now_fn())
+    usage = result.get("usage")
+    storage.log_usage(chat_id, usage, len(msgs), ts=now)
     summary = helpers.scrub(summary, settings["filter_level"], PROFANITY_WORDLIST)
     summary = helpers.render_telegram_html(summary)
     user = _user(message)
     mention = helpers.format_mention(user.get("id"), _user_name(user) or "you")
     if reduced_after_block:
-        source = "reduced after Gemini safety block"
+        source = "reduced after model safety block"
     elif args and args[0].lower() == "auto":
         source = "based on context budget"
     else:
@@ -398,6 +497,245 @@ def _handle_summarize(storage, telegram, message, args, summarize_fn, now_fn):
         f"{mention}, here is your summary of the last {len(msgs)} messages "
         f"({source}):\n\n{summary}",
     )
+    _maybe_send_quota_warning(storage, telegram, chat_id, usage, now)
+
+
+def _handle_chat(storage, telegram, message, args, chat_fn, now_fn):
+    chat_id = _reply_target(message)
+    question = " ".join(args).strip()
+    if not question:
+        _start_command_input(
+            storage,
+            telegram,
+            message,
+            "run_chat",
+            "Send your general question as your next message.",
+            now_fn,
+        )
+        return
+    settings = storage.get_settings(chat_id)
+    try:
+        result = _chat_result(question, settings, chat_fn)
+    except llm.LLMBlockedError:
+        logger.warning("chat prompt blocked")
+        telegram.send_message(
+            chat_id,
+            "The selected model blocked this chat request. Try rephrasing it.",
+        )
+        return
+    except Exception:
+        logger.exception("chat failed")
+        telegram.send_message(
+            chat_id, "Sorry, the chat assistant is unavailable right now. Please try again."
+        )
+        return
+
+    now = int(now_fn())
+    usage = result.get("usage")
+    storage.log_usage(chat_id, usage, 0, ts=now)
+    text = helpers.render_telegram_html(result["text"])
+    _send_ai_html_response(telegram, chat_id, text)
+    _maybe_send_quota_warning(storage, telegram, chat_id, usage, now)
+
+
+def _start_command_input(storage, telegram, message, action, prompt, now_fn):
+    user_id = _user(message).get("id")
+    if user_id is None or not hasattr(storage, "set_pending_input"):
+        telegram.send_message(_chat_id(message), prompt)
+        return
+    storage.set_pending_input(
+        user_id,
+        action,
+        _reply_target(message),
+        now=int(now_fn()),
+    )
+    telegram.send_message(_chat_id(message), prompt)
+
+
+def _handle_ask(storage, telegram, message, args, ask_fn, now_fn):
+    chat_id = _reply_target(message)
+    question = " ".join(args).strip()
+    if not question:
+        _start_command_input(
+            storage,
+            telegram,
+            message,
+            "run_ask",
+            "Send your chat-history question as your next message.",
+            now_fn,
+        )
+        return
+
+    telegram.send_message(chat_id, "Searching chat history…")
+    settings = storage.get_settings(chat_id)
+    try:
+        if ask_fn is None:
+            result = history_qa.ask_history(chat_id, question, storage, settings)
+        else:
+            result = ask_fn(question, chat_id, storage, settings)
+    except llm.LLMBlockedError:
+        logger.warning("ask prompt blocked")
+        telegram.send_message(
+            chat_id,
+            "The selected model blocked this history question. Try rephrasing it.",
+        )
+        return
+    except Exception:
+        logger.exception("ask failed")
+        telegram.send_message(
+            chat_id,
+            "Sorry, history search is unavailable right now. Please try again.",
+        )
+        return
+
+    now = int(now_fn())
+    usage = result.get("usage")
+    evidence_count = int(result.get("evidence_count", 0))
+    storage.log_usage(chat_id, usage, evidence_count, ts=now)
+    text = helpers.scrub(
+        result["text"], settings["filter_level"], PROFANITY_WORDLIST
+    )
+    text = helpers.render_telegram_html(text)
+    _send_ai_html_response(telegram, chat_id, text)
+    _maybe_send_quota_warning(storage, telegram, chat_id, usage, now)
+
+
+def _handle_lore(storage, telegram, message, command, args, lore_fn, now_fn):
+    chat_id = _reply_target(message)
+    argument = " ".join(args).strip()
+    if not argument and command == "insidejoke":
+        _start_command_input(
+            storage,
+            telegram,
+            message,
+            "run_insidejoke",
+            "Send the inside joke or recurring reference to search for as your next message.",
+            now_fn,
+        )
+        return
+
+    telegram.send_message(chat_id, "Searching chat lore…")
+    settings = storage.get_settings(chat_id)
+    try:
+        if lore_fn is None:
+            result = lore.answer_lore(
+                command,
+                argument,
+                chat_id,
+                storage,
+                settings,
+                now_fn=now_fn,
+            )
+        else:
+            result = lore_fn(command, argument, chat_id, storage, settings)
+    except ValueError:
+        telegram.send_message(
+            chat_id,
+            f"Usage: /{command} "
+            + ("<term>" if command == "insidejoke" else "<name>" if command == "quotes" else "[today|week|month|year|all]"),
+        )
+        return
+    except llm.LLMBlockedError:
+        logger.warning("lore prompt blocked")
+        telegram.send_message(
+            chat_id,
+            "The selected model blocked this lore request. Try rephrasing it.",
+        )
+        return
+    except Exception:
+        logger.exception("lore search failed")
+        telegram.send_message(
+            chat_id,
+            "Sorry, lore search is unavailable right now. Please try again.",
+        )
+        return
+
+    now = int(now_fn())
+    usage = result.get("usage")
+    evidence_count = int(result.get("evidence_count", 0))
+    storage.log_usage(chat_id, usage, evidence_count, ts=now)
+    text = helpers.scrub(result["text"], settings["filter_level"], PROFANITY_WORDLIST)
+    text = helpers.render_telegram_html(text)
+    _send_ai_html_response(telegram, chat_id, text)
+    _maybe_send_quota_warning(storage, telegram, chat_id, usage, now)
+
+
+def _handle_remember(storage, telegram, message, args, remember_fn, now_fn):
+    chat_id = _reply_target(message)
+    user_id = _user(message).get("id")
+    if not _is_admin(telegram, message, user_id):
+        telegram.send_message(chat_id, "Only admins can build memory snapshots.")
+        return
+    value = args[0].lower() if args else "auto"
+    if value == "auto":
+        message_limit = config.MEMORY_MAX_MESSAGES
+    else:
+        try:
+            message_limit = int(value)
+        except ValueError:
+            telegram.send_message(chat_id, "Usage: /remember [N|auto]")
+            return
+        message_limit = max(1, min(message_limit, config.MEMORY_MAX_MESSAGES))
+
+    telegram.send_message(chat_id, "Building a memory snapshot…")
+    settings = storage.get_settings(chat_id)
+    try:
+        if remember_fn is None:
+            result = memory.generate_snapshot(
+                chat_id,
+                storage,
+                settings,
+                message_limit=message_limit,
+                now_fn=now_fn,
+            )
+        else:
+            result = remember_fn(chat_id, storage, settings, message_limit)
+    except llm.LLMBlockedError:
+        logger.warning("memory prompt blocked")
+        telegram.send_message(
+            chat_id,
+            "The selected model blocked this memory snapshot. Try a smaller range.",
+        )
+        return
+    except (ValueError, TypeError):
+        logger.exception("memory response invalid")
+        telegram.send_message(
+            chat_id,
+            "The model returned an invalid memory snapshot. Please try again.",
+        )
+        return
+    except Exception:
+        logger.exception("memory generation failed")
+        telegram.send_message(
+            chat_id,
+            "Sorry, memory generation is unavailable right now. Please try again.",
+        )
+        return
+
+    now = int(now_fn())
+    usage = result.get("usage")
+    source_count = int(result.get("source_message_count", 0))
+    storage.log_usage(chat_id, usage, source_count, ts=now)
+    if result.get("invalid_memory"):
+        telegram.send_message(
+            chat_id,
+            "The model returned an invalid memory snapshot. Please try again.",
+        )
+        _maybe_send_quota_warning(storage, telegram, chat_id, usage, now)
+        return
+    snapshot = result.get("snapshot")
+    if snapshot is None:
+        if source_count:
+            telegram.send_message(chat_id, "No durable chat lore was found in that range.")
+        else:
+            _send_no_history(telegram, chat_id)
+    else:
+        telegram.send_message(
+            chat_id,
+            f"Saved a memory snapshot from {snapshot['message_count']} messages "
+            f"with {len(snapshot['items'])} lore items.",
+        )
+    _maybe_send_quota_warning(storage, telegram, chat_id, usage, now)
 
 
 def _handle_settings(storage, telegram, message):
@@ -405,8 +743,58 @@ def _handle_settings(storage, telegram, message):
     telegram.send_message(chat_id, _settings_text(storage, message))
 
 
+def _handle_models(storage, telegram, message):
+    target_chat_id = _control_target_chat(storage, message)
+    settings = storage.get_settings(target_chat_id)
+    telegram.send_message(_chat_id(message), llm.models_text(settings))
+
+
+def _handle_setprovider(storage, telegram, message, args):
+    chat_id = _chat_id(message)
+    target_chat_id = _control_target_chat(storage, message)
+    user_id = _user(message).get("id")
+    if not _is_admin(telegram, message, user_id):
+        telegram.send_message(chat_id, "Only admins can change settings.")
+        return
+    try:
+        provider = llm.normalize_provider(args[0] if args else "")
+    except ValueError:
+        telegram.send_message(chat_id, "Usage: /setprovider gemini|groq")
+        return
+    storage.set_setting(target_chat_id, "provider", provider)
+    storage.set_setting(target_chat_id, "model", "")
+    suffix = f" for {target_chat_id}" if target_chat_id != chat_id else ""
+    model = llm.DEFAULT_MODELS[provider]
+    telegram.send_message(
+        chat_id,
+        f"Updated provider{suffix} to: {provider}\nUsing default model: {model}",
+    )
+
+
+def _handle_setmodel(storage, telegram, message, args):
+    chat_id = _chat_id(message)
+    target_chat_id = _control_target_chat(storage, message)
+    user_id = _user(message).get("id")
+    if not _is_admin(telegram, message, user_id):
+        telegram.send_message(chat_id, "Only admins can change settings.")
+        return
+    value = " ".join(args).strip()
+    settings = storage.get_settings(target_chat_id)
+    try:
+        provider, model = llm.parse_model_selection(
+            value, settings.get("provider", config.DEFAULT_LLM_PROVIDER)
+        )
+    except ValueError:
+        telegram.send_message(chat_id, "Usage: /setmodel <model|provider:model>")
+        return
+    storage.set_setting(target_chat_id, "provider", provider)
+    storage.set_setting(target_chat_id, "model", model)
+    suffix = f" for {target_chat_id}" if target_chat_id != chat_id else ""
+    telegram.send_message(chat_id, f"Updated model{suffix} to: {provider}:{model}")
+
+
 def _handle_help(storage, telegram, message):
-    _render_home(storage, telegram, message)
+    _render_help_menu(storage, telegram, message)
 
 
 def _handle_chats(storage, telegram, message):
@@ -587,7 +975,9 @@ def _handle_callback(update, storage, telegram, summarize_fn, now_fn):
             _render_settings_menu(storage, telegram, message, message_id=message_id)
 
 
-def _consume_pending_input(storage, telegram, message, text, now_fn):
+def _consume_pending_input(
+    storage, telegram, message, text, now_fn, chat_fn=None, ask_fn=None, lore_fn=None
+):
     user_id = _user(message).get("id")
     if user_id is None or not hasattr(storage, "get_pending_input"):
         return False
@@ -597,15 +987,37 @@ def _consume_pending_input(storage, telegram, message, text, now_fn):
     if hasattr(storage, "delete_pending_input"):
         storage.delete_pending_input(user_id)
 
+    value = text.strip()
+    if not value:
+        telegram.send_message(_chat_id(message), "Nothing was entered.")
+        return True
+    action = pending.get("action")
+    if action in {"run_ask", "run_chat", "run_insidejoke"}:
+        if pending["target_chat_id"] != _reply_target(message):
+            telegram.send_message(
+                _chat_id(message), "That request belonged to a different chat. Start it again here."
+            )
+            return True
+        if action == "run_ask":
+            _handle_ask(storage, telegram, message, [value], ask_fn, now_fn)
+        elif action == "run_chat":
+            _handle_chat(storage, telegram, message, [value], chat_fn, now_fn)
+        else:
+            _handle_lore(
+                storage,
+                telegram,
+                message,
+                action.removeprefix("run_"),
+                [value],
+                lore_fn,
+                now_fn,
+            )
+        return True
+
     target_chat_id = pending["target_chat_id"]
     if not _change_allowed_for_target(storage, telegram, message, target_chat_id):
         telegram.send_message(_chat_id(message), "Only admins can change settings.")
         return True
-    value = text.strip()
-    if not value:
-        telegram.send_message(_chat_id(message), "Setting was not changed.")
-        return True
-    action = pending.get("action")
     if action == "set_style_custom":
         storage.set_setting(target_chat_id, "style", value)
         telegram.send_message(_chat_id(message), f"Updated style to: {value}")
@@ -615,7 +1027,17 @@ def _consume_pending_input(storage, telegram, message, text, now_fn):
     return True
 
 
-def process_update(update, storage, telegram, summarize_fn=None, now_fn=None):
+def process_update(
+    update,
+    storage,
+    telegram,
+    summarize_fn=None,
+    chat_fn=None,
+    now_fn=None,
+    ask_fn=None,
+    remember_fn=None,
+    lore_fn=None,
+):
     now_fn = now_fn or time.time
     if update.get("callback_query"):
         _handle_callback(update, storage, telegram, summarize_fn, now_fn)
@@ -629,11 +1051,35 @@ def process_update(update, storage, telegram, summarize_fn=None, now_fn=None):
         return
 
     command, args = _command_parts(text)
-    if command is None and _consume_pending_input(storage, telegram, message, text, now_fn):
+    button_command = bot_menu.BUTTON_COMMANDS.get(text)
+    if button_command:
+        command, args = button_command, []
+        if hasattr(storage, "delete_pending_input") and user.get("id") is not None:
+            storage.delete_pending_input(user["id"])
+    if command is None and _consume_pending_input(
+        storage,
+        telegram,
+        message,
+        text,
+        now_fn,
+        chat_fn=chat_fn,
+        ask_fn=ask_fn,
+        lore_fn=lore_fn,
+    ):
         return
 
     if command == "summarize":
         _handle_summarize(storage, telegram, message, args, summarize_fn, now_fn)
+    elif command == "ask":
+        _handle_ask(storage, telegram, message, args, ask_fn, now_fn)
+    elif command == "remember":
+        _handle_remember(storage, telegram, message, args, remember_fn, now_fn)
+    elif command == "chat":
+        _handle_chat(storage, telegram, message, args, chat_fn, now_fn)
+    elif command in {"lore", "insidejoke", "bestof", "quotes", "recap"}:
+        _handle_lore(storage, telegram, message, command, args, lore_fn, now_fn)
+    elif command == "models":
+        _handle_models(storage, telegram, message)
     elif command == "settings":
         _handle_settings(storage, telegram, message)
     elif command == "chats":
@@ -644,7 +1090,9 @@ def process_update(update, storage, telegram, summarize_fn=None, now_fn=None):
         _handle_usage(storage, telegram, message, args, now_fn)
     elif command == "whoami":
         _handle_whoami(telegram, message)
-    elif command in {"help", "start", "menu"}:
+    elif command == "menu":
+        _render_home(storage, telegram, message)
+    elif command in {"help", "start"}:
         _handle_help(storage, telegram, message)
     elif command == "setstyle":
         value = " ".join(args).strip()
@@ -664,6 +1112,10 @@ def process_update(update, storage, telegram, summarize_fn=None, now_fn=None):
             telegram.send_message(chat_id, "Usage: /setlang <code|auto>")
         else:
             _change_setting(storage, telegram, message, "language", value)
+    elif command == "setprovider":
+        _handle_setprovider(storage, telegram, message, args)
+    elif command == "setmodel":
+        _handle_setmodel(storage, telegram, message, args)
     elif command is None:
         storage.log_message(
             chat_id,
@@ -675,7 +1127,17 @@ def process_update(update, storage, telegram, summarize_fn=None, now_fn=None):
         )
 
 
-def handle_sqs_event(event, storage, telegram, summarize_fn=None, now_fn=None):
+def handle_sqs_event(
+    event,
+    storage,
+    telegram,
+    summarize_fn=None,
+    chat_fn=None,
+    now_fn=None,
+    ask_fn=None,
+    remember_fn=None,
+    lore_fn=None,
+):
     for record in event.get("Records", []):
         try:
             process_update(
@@ -683,7 +1145,11 @@ def handle_sqs_event(event, storage, telegram, summarize_fn=None, now_fn=None):
                 storage,
                 telegram,
                 summarize_fn=summarize_fn,
+                chat_fn=chat_fn,
                 now_fn=now_fn,
+                ask_fn=ask_fn,
+                remember_fn=remember_fn,
+                lore_fn=lore_fn,
             )
         except TelegramApiError as exc:
             if exc.status_code and 400 <= exc.status_code < 500 and exc.status_code != 429:

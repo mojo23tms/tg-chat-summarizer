@@ -71,14 +71,42 @@ def normalize_message(message):
     }
 
 
+def importable_messages(export_data):
+    if not isinstance(export_data, dict):
+        raise ValueError("Telegram export must be a JSON object")
+    return [
+        normalized
+        for normalized in (
+            normalize_message(message) for message in export_data.get("messages", [])
+        )
+        if normalized is not None
+    ]
+
+
 def load_importable_messages(path):
     with Path(path).open(encoding="utf-8") as fh:
         data = json.load(fh)
-    return [
-        normalized
-        for normalized in (normalize_message(message) for message in data.get("messages", []))
-        if normalized is not None
-    ]
+    return importable_messages(data)
+
+
+def load_s3_importable_messages(s3_uri, region, command_runner=None):
+    if not str(s3_uri).startswith("s3://"):
+        raise ValueError("--s3-uri must start with s3://")
+    command_runner = command_runner or subprocess.run
+    result = command_runner(
+        ["aws", "s3", "cp", str(s3_uri), "-", "--region", region],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise SystemExit(f"aws s3 cp failed:\n{detail}")
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{s3_uri} did not contain valid JSON") from exc
+    return importable_messages(data)
 
 
 def select_messages(messages, limit, skip_latest=0):
@@ -204,9 +232,17 @@ def build_storage(table_name, ttl_days, region):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Import Telegram Desktop JSON export messages into DynamoDB."
+        description=(
+            "Import Telegram Desktop JSON export messages from a local file or S3 "
+            "into DynamoDB."
+        )
     )
-    parser.add_argument("--file", required=True, help="Path to Telegram result.json")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--file", help="Path to Telegram result.json")
+    source.add_argument(
+        "--s3-uri",
+        help="Offline S3 source, for example s3://private-bucket/result.json.",
+    )
     parser.add_argument(
         "--chat-id",
         required=True,
@@ -262,7 +298,10 @@ def parse_args():
 
 def main():
     args = parse_args()
-    messages = load_importable_messages(args.file)
+    if args.s3_uri:
+        messages = load_s3_importable_messages(args.s3_uri, args.region)
+    else:
+        messages = load_importable_messages(args.file)
     try:
         selected = select_messages(messages, args.limit, args.skip_latest)
     except ValueError as exc:

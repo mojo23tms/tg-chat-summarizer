@@ -31,6 +31,9 @@ Use this checklist after every implementation batch.
 - Unit tests cover the new behavior.
 - Offline tests use fakes and injected clients.
 - Edge cases are included for long outputs, malformed HTML, pagination, and provider failures.
+- Routine tests make no real LLM calls and consume no provider quota.
+- Any necessary live provider smoke test is minimal, explicit, and run only
+  after offline verification passes.
 
 ## Security and Privacy
 

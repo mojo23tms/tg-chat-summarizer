@@ -17,7 +17,14 @@ Globals:
         BOT_OWNER_IDS: !Ref BotOwnerIds
         MAX_INPUT_TOKENS: !Ref MaxInputTokens
         SUMMARY_OUTPUT_TOKENS: !Ref SummaryOutputTokens
+        ASK_OUTPUT_TOKENS: !Ref AskOutputTokens
+        MEMORY_OUTPUT_TOKENS: !Ref MemoryOutputTokens
+        MEMORY_MAX_MESSAGES: !Ref MemoryMaxMessages
         SUMMARY_MAX_MESSAGES: !Ref SummaryMaxMessages
+        LLM_REQUEST_TIMEOUT_SECONDS: !Ref LlmRequestTimeoutSeconds
+        GEMINI_DAILY_TOKEN_QUOTA: !Ref GeminiDailyTokenQuota
+        GROQ_DAILY_TOKEN_QUOTA: !Ref GroqDailyTokenQuota
+        QUOTA_WARNING_REMAINING_PERCENT: !Ref QuotaWarningRemainingPercent
         LLM_BACKEND: gemini
 
 Parameters:
@@ -36,9 +43,30 @@ Parameters:
   SummaryOutputTokens:
     Type: Number
     Default: 1500
+  AskOutputTokens:
+    Type: Number
+    Default: 500
+  MemoryOutputTokens:
+    Type: Number
+    Default: 1000
+  MemoryMaxMessages:
+    Type: Number
+    Default: 500
   SummaryMaxMessages:
     Type: Number
     Default: 5000
+  LlmRequestTimeoutSeconds:
+    Type: Number
+    Default: 45
+  GeminiDailyTokenQuota:
+    Type: Number
+    Default: 0
+  GroqDailyTokenQuota:
+    Type: Number
+    Default: 0
+  QuotaWarningRemainingPercent:
+    Type: Number
+    Default: 10
 
 Resources:
   TelegramApi:

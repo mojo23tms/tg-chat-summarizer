@@ -15,6 +15,8 @@ def test_set_and_get_setting_override():
     assert s["filter_level"] == "strict"
     assert s["style"] == "formal paragraphs"
     assert s["language"] == config.DEFAULTS["language"]  # untouched default
+    assert s["provider"] == config.DEFAULTS["provider"]
+    assert s["model"] == config.DEFAULTS["model"]
 
 
 def test_set_setting_is_upsert():

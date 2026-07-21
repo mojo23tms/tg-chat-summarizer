@@ -29,7 +29,18 @@ Cloud archive copies may later be exported to Google Drive or NordLocker, but th
 
 ## Cost Strategy
 
-Generate snapshots periodically or on command, then use relevant snapshots plus selected raw messages for `/ask`. This reduces repeated large-context LLM calls.
+Admins explicitly generate snapshots with `/remember [N|auto]`. The command
+reads at most `MEMORY_MAX_MESSAGES`, applies the shared input-token budget,
+requires structured JSON, and records provider usage. Explicit generation is
+the configured low-cost mode for this batch; no background provider calls occur.
+
+`/ask` keyword-ranks up to five snapshots from a bounded recent-memory scan and
+budgets them together with selected raw messages. Raw evidence takes precedence
+if a compressed snapshot conflicts with it.
+
+Repeated generation over the same source timestamp range overwrites the prior
+snapshot. Runtime snapshots are chat-scoped and never read from S3 or personal
+cloud storage.
 
 ## Future Extension
 
