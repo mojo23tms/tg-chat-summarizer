@@ -45,3 +45,16 @@ cloud storage.
 ## Future Extension
 
 Embeddings may be added later for memory snapshots first. Do not embed every raw Telegram message unless there is a clear cost and value justification.
+
+## Historical Backfill
+
+`scripts/backfill_historical_memory.py` processes messages already present in
+DynamoDB from oldest to newest. It uses bounded explicit chunks, persists a
+chat-scoped checkpoint only after a successful provider response, and resumes
+after failure without regenerating completed ranges. Completed jobs can be run
+again to process only newly arrived messages.
+
+Historical snapshots add deterministic lexical terms, participants, source
+timestamps, and Telegram message IDs. Dry-run mode estimates calls, tokens, and
+operator-supplied pricing without calling an LLM or writing state. See
+`docs/historical-memory-backfill.md` for operations and recovery.

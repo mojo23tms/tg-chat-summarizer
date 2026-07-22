@@ -44,6 +44,7 @@ def test_parse_memory_content_normalizes_bounded_structured_json():
     assert len(parsed["items"]) == 2
     assert parsed["items"][0]["people"] == ["Alice"]
     assert parsed["items"][0]["source_timestamps"] == [123]
+    assert parsed["items"][0]["source_message_ids"] == []
     assert parsed["items"][1]["kind"] == "other_lore"
 
 
@@ -87,6 +88,9 @@ def test_generate_snapshot_uses_bounded_messages_and_saves_metadata():
     assert snapshot["start_ts"] == 4
     assert snapshot["end_ts"] == 6
     assert snapshot["message_count"] == 3
+    assert snapshot["participants"] == ["Alice"]
+    assert "ibiza" in snapshot["lexical_terms"]
+    assert snapshot["source_message_ids"] == []
     assert storage.saved == [(10, snapshot)]
     assert result["source_message_count"] == 3
     assert result["usage"] is not None

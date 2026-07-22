@@ -47,8 +47,20 @@ sk = MEMORY#{start_timestamp_padded}#{end_timestamp_padded}
 ```
 
 Attributes include `version`, `created_at`, `start_ts`, `end_ts`,
-`message_count`, `summary`, and structured `items`. Rebuilding the same source
-range is idempotent.
+`message_count`, `summary`, structured `items`, `participants`,
+`lexical_terms`, and `source_message_ids`. Rebuilding the same source range is
+idempotent.
+
+Historical memory checkpoint:
+
+```text
+pk = CHAT#{chat_id}
+sk = BACKFILL#HISTORICAL_MEMORY
+```
+
+The checkpoint stores the opaque DynamoDB message cursor, source time bounds,
+status, cumulative processed message/chunk counts, selected provider/model, and
+update time. It advances only after a chunk has completed successfully.
 
 ## Planned Item Families
 

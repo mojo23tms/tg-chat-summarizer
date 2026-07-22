@@ -1,6 +1,7 @@
 import json
 import shutil
 import sqlite3
+import time
 
 from . import config
 from .retrieval import rank_memory_snapshots
@@ -50,6 +51,13 @@ CREATE TABLE IF NOT EXISTS memory_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_memory_chat_created
 ON memory_snapshots (chat_id, created_at);
+
+CREATE TABLE IF NOT EXISTS backfill_checkpoints (
+    chat_id         INTEGER NOT NULL,
+    job_name        TEXT NOT NULL,
+    checkpoint_json TEXT NOT NULL,
+    PRIMARY KEY (chat_id, job_name)
+);
 """
 
 
@@ -126,6 +134,48 @@ def message_page(
     return page, cursor
 
 
+def chronological_message_page(
+    conn,
+    chat_id,
+    *,
+    start_ts=0,
+    end_ts=99_999_999_999,
+    limit=100,
+    exclusive_start_key=None,
+):
+    start_ts = int(start_ts)
+    end_ts = int(end_ts)
+    limit = int(limit)
+    if start_ts > end_ts:
+        return [], None
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    sql = (
+        "SELECT id, msg_id, user_id, user_name, text, ts FROM messages "
+        "WHERE chat_id = ? AND ts BETWEEN ? AND ?"
+    )
+    params = [int(chat_id), start_ts, end_ts]
+    if exclusive_start_key is not None:
+        cursor_ts = int(exclusive_start_key["ts"])
+        cursor_msg_id = int(exclusive_start_key["msg_id"])
+        sql += " AND (ts > ? OR (ts = ? AND msg_id > ?))"
+        params.extend([cursor_ts, cursor_ts, cursor_msg_id])
+    sql += " ORDER BY ts ASC, msg_id ASC LIMIT ?"
+    params.append(limit + 1)
+    rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    cursor = None
+    if has_more:
+        cursor = {
+            "ts": int(page[-1]["ts"]),
+            "msg_id": int(page[-1]["msg_id"]),
+        }
+    for row in page:
+        row.pop("id", None)
+    return page, cursor
+
+
 class SQLiteMessagePageStorage:
     def __init__(self, conn):
         self.conn = conn
@@ -135,6 +185,12 @@ class SQLiteMessagePageStorage:
 
     def recent_messages(self, chat_id, n):
         return recent_messages(self.conn, chat_id, n)
+
+    def chronological_message_page(self, chat_id, **kwargs):
+        return chronological_message_page(self.conn, chat_id, **kwargs)
+
+    def message_cursor(self, chat_id, message):
+        return {"ts": int(message["ts"]), "msg_id": int(message["msg_id"])}
 
     def save_memory_snapshot(self, chat_id, snapshot):
         return save_memory_snapshot(self.conn, chat_id, snapshot)
@@ -152,6 +208,42 @@ class SQLiteMessagePageStorage:
             end_ts=end_ts,
         )
 
+    def get_backfill_checkpoint(self, chat_id, job_name="historical_memory"):
+        return get_backfill_checkpoint(self.conn, chat_id, job_name=job_name)
+
+    def save_backfill_checkpoint(
+        self, chat_id, checkpoint, job_name="historical_memory"
+    ):
+        return save_backfill_checkpoint(
+            self.conn, chat_id, checkpoint, job_name=job_name
+        )
+
+    def clear_backfill_checkpoint(self, chat_id, job_name="historical_memory"):
+        return clear_backfill_checkpoint(self.conn, chat_id, job_name=job_name)
+
+    def get_settings(self, chat_id):
+        return get_settings(self.conn, chat_id)
+
+    def log_usage(self, chat_id, usage, messages_count, ts=None):
+        return log_usage(
+            self.conn,
+            chat_id,
+            usage,
+            messages_count,
+            int(time.time()) if ts is None else ts,
+        )
+
+    def usage_totals(
+        self, chat_id, since_ts=None, provider=None, model=None
+    ):
+        return usage_totals(
+            self.conn,
+            chat_id,
+            since_ts=since_ts,
+            provider=provider,
+            model=model,
+        )
+
 
 def save_memory_snapshot(conn, chat_id, snapshot):
     content = {
@@ -162,6 +254,9 @@ def save_memory_snapshot(conn, chat_id, snapshot):
         "message_count": int(snapshot["message_count"]),
         "summary": snapshot.get("summary", ""),
         "items": snapshot.get("items", []),
+        "participants": snapshot.get("participants", []),
+        "lexical_terms": snapshot.get("lexical_terms", []),
+        "source_message_ids": snapshot.get("source_message_ids", []),
     }
     conn.execute(
         "INSERT INTO memory_snapshots "
@@ -205,6 +300,39 @@ def search_memories(
     return rank_memory_snapshots(memories, query, limit)
 
 
+def get_backfill_checkpoint(conn, chat_id, job_name="historical_memory"):
+    row = conn.execute(
+        "SELECT checkpoint_json FROM backfill_checkpoints "
+        "WHERE chat_id = ? AND job_name = ?",
+        (int(chat_id), str(job_name)),
+    ).fetchone()
+    return json.loads(row["checkpoint_json"]) if row else None
+
+
+def save_backfill_checkpoint(
+    conn, chat_id, checkpoint, job_name="historical_memory"
+):
+    conn.execute(
+        "INSERT INTO backfill_checkpoints (chat_id, job_name, checkpoint_json) "
+        "VALUES (?, ?, ?) ON CONFLICT(chat_id, job_name) DO UPDATE SET "
+        "checkpoint_json = excluded.checkpoint_json",
+        (
+            int(chat_id),
+            str(job_name),
+            json.dumps(checkpoint, ensure_ascii=False, separators=(",", ":")),
+        ),
+    )
+    conn.commit()
+
+
+def clear_backfill_checkpoint(conn, chat_id, job_name="historical_memory"):
+    conn.execute(
+        "DELETE FROM backfill_checkpoints WHERE chat_id = ? AND job_name = ?",
+        (int(chat_id), str(job_name)),
+    )
+    conn.commit()
+
+
 def get_settings(conn, chat_id):
     settings = dict(config.DEFAULTS)
     cur = conn.execute(
@@ -246,7 +374,7 @@ def log_usage(conn, chat_id, usage, messages_count, ts):
     conn.commit()
 
 
-def usage_totals(conn, chat_id, since_ts=None):
+def usage_totals(conn, chat_id, since_ts=None, provider=None, model=None):
     sql = (
         "SELECT COUNT(*) AS requests, COALESCE(SUM(messages_count), 0) AS messages_count, "
         "COALESCE(SUM(input_tokens), 0) AS input_tokens, "
@@ -259,6 +387,12 @@ def usage_totals(conn, chat_id, since_ts=None):
     if since_ts is not None:
         sql += " AND ts >= ?"
         params.append(int(since_ts))
+    if provider is not None:
+        sql += " AND provider = ?"
+        params.append(str(provider))
+    if model is not None:
+        sql += " AND model = ?"
+        params.append(str(model))
     return dict(conn.execute(sql, params).fetchone())
 
 

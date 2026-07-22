@@ -151,6 +151,9 @@ Each command must use memory/retrieval and avoid huge scans.
 
 ## Batch 11: Historical Memory Backfill And Cheap Archive Retrieval
 
+Status: implemented with resumable offline chunking, lexical memory search, and
+bounded supporting-range retrieval.
+
 Make a full imported chat archive convenient to use without increasing live
 prompt size or putting S3 in the Telegram request path.
 

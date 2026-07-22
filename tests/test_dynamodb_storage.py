@@ -137,6 +137,26 @@ def test_message_pages_are_chat_scoped_time_bounded_and_paginated():
     assert all(row["user_id"] == 10 for row in first + second)
 
 
+def test_chronological_message_pages_resume_without_gaps_or_other_chats():
+    storage, _table = adapter()
+    for ts in range(1, 6):
+        storage.log_message(1, ts, 10, "alice", f"m{ts}", ts=ts)
+    storage.log_message(2, 99, 20, "other", "wrong chat", ts=3)
+
+    first, cursor = storage.chronological_message_page(1, limit=2)
+    second, next_cursor = storage.chronological_message_page(
+        1, limit=2, exclusive_start_key=cursor
+    )
+    third, final_cursor = storage.chronological_message_page(
+        1, limit=2, exclusive_start_key=next_cursor
+    )
+
+    assert [row["text"] for row in first + second + third] == [
+        "m1", "m2", "m3", "m4", "m5"
+    ]
+    assert final_cursor is None
+
+
 def test_memory_snapshots_are_idempotent_chat_scoped_and_searchable():
     storage, table = adapter()
     snapshot = {
@@ -180,6 +200,49 @@ def test_memory_snapshots_are_idempotent_chat_scoped_and_searchable():
             1, "ibiza", start_ts=15, end_ts=30, limit=5, scan_limit=10
         )
     ) == 1
+
+
+def test_memory_search_paginates_beyond_newest_hundred_snapshots():
+    storage, _table = adapter()
+    for index in range(130):
+        storage.save_memory_snapshot(
+            1,
+            {
+                "version": 1,
+                "created_at": index,
+                "start_ts": index * 10,
+                "end_ts": index * 10 + 9,
+                "message_count": 2,
+                "summary": "ancient ibiza" if index == 0 else f"chunk {index}",
+                "items": [],
+            },
+        )
+
+    rows = storage.search_memories(1, "ancient ibiza", limit=3, scan_limit=200)
+
+    assert len(rows) == 1
+    assert rows[0]["start_ts"] == 0
+
+
+def test_backfill_checkpoint_is_chat_scoped_and_clearable():
+    storage, _table = adapter()
+    checkpoint = {
+        "version": 1,
+        "status": "in_progress",
+        "start_ts": 0,
+        "end_ts": 100,
+        "cursor": {"pk": "CHAT#1", "sk": "MSG#1"},
+        "processed_messages": 10,
+        "processed_chunks": 1,
+        "updated_at": 500,
+    }
+
+    storage.save_backfill_checkpoint(1, checkpoint)
+
+    assert storage.get_backfill_checkpoint(1) == checkpoint
+    assert storage.get_backfill_checkpoint(2) is None
+    storage.clear_backfill_checkpoint(1)
+    assert storage.get_backfill_checkpoint(1) is None
 
 
 def test_settings_defaults_merge_with_stored_overrides():

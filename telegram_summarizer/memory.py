@@ -49,6 +49,42 @@ def _clean_timestamps(values):
     return timestamps
 
 
+def _clean_ids(values):
+    if not isinstance(values, list):
+        return []
+    identifiers = []
+    for value in values[:50]:
+        try:
+            identifier = int(value)
+        except (TypeError, ValueError):
+            continue
+        if identifier >= 0 and identifier not in identifiers:
+            identifiers.append(identifier)
+    return identifiers
+
+
+def _lexical_terms(summary, items, participants, limit=200):
+    source = " ".join(
+        [summary, *participants]
+        + [
+            " ".join(
+                [
+                    item.get("title", ""),
+                    item.get("details", ""),
+                    *item.get("people", []),
+                    *item.get("keywords", []),
+                ]
+            )
+            for item in items
+        ]
+    )
+    return list(
+        dict.fromkeys(
+            word for word in re.findall(r"\w+", source.casefold()) if len(word) >= 3
+        )
+    )[:limit]
+
+
 def parse_memory_content(text):
     raw = str(text or "").strip()
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", raw, flags=re.DOTALL | re.I)
@@ -86,6 +122,9 @@ def parse_memory_content(text):
                 "source_timestamps": _clean_timestamps(
                     raw_item.get("source_timestamps")
                 ),
+                "source_message_ids": _clean_ids(
+                    raw_item.get("source_message_ids")
+                ),
             }
         )
     if not summary and not items:
@@ -106,13 +145,45 @@ def generate_snapshot(
     if message_limit < 1:
         raise ValueError("message_limit must be positive")
     messages = storage.recent_messages(chat_id, message_limit)
-    selected = llm.select_memory_messages_for_token_budget(messages, settings)
+    return generate_snapshot_from_messages(
+        chat_id,
+        storage,
+        settings,
+        messages,
+        backend_fn=backend_fn,
+        now_fn=now_fn,
+    )
+
+
+def generate_snapshot_from_messages(
+    chat_id,
+    storage,
+    settings,
+    messages,
+    *,
+    backend_fn=None,
+    now_fn=None,
+    max_input_tokens=None,
+    output_tokens=None,
+):
+    messages = list(messages)
+    selected = llm.select_memory_messages_for_token_budget(
+        messages,
+        settings,
+        max_input_tokens=max_input_tokens,
+        output_tokens=output_tokens,
+    )
     if not selected:
         result = llm.empty_result("Nothing to remember yet.", settings)
         result.update({"snapshot": None, "source_message_count": 0})
         return result
 
-    result = llm.memory_with_usage(selected, settings, backend_fn=backend_fn)
+    result = llm.memory_with_usage(
+        selected,
+        settings,
+        backend_fn=backend_fn,
+        max_output_tokens=output_tokens,
+    )
     try:
         content = parse_memory_content(result["text"])
     except ValueError:
@@ -135,14 +206,31 @@ def generate_snapshot(
         return result
 
     now_fn = now_fn or time.time
+    participants = list(
+        dict.fromkeys(
+            str(message.get("user_name", "unknown")) for message in selected
+        )
+    )[:100]
+    source_message_ids = list(
+        dict.fromkeys(
+            int(message["msg_id"])
+            for message in selected
+            if message.get("msg_id") is not None
+        )
+    )
     snapshot = {
         "version": 1,
         "created_at": int(now_fn()),
         "start_ts": min(int(message.get("ts", 0)) for message in selected),
         "end_ts": max(int(message.get("ts", 0)) for message in selected),
         "message_count": len(selected),
+        "participants": participants,
+        "source_message_ids": source_message_ids,
         **content,
     }
+    snapshot["lexical_terms"] = _lexical_terms(
+        snapshot["summary"], snapshot["items"], participants
+    )
     storage.save_memory_snapshot(chat_id, snapshot)
     result.update(
         {

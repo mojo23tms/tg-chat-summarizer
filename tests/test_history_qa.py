@@ -152,7 +152,7 @@ def test_ask_history_uses_relevant_memory_when_raw_messages_are_missing():
     )
 
     assert storage.calls == [
-        (10, {"query": "started ibiza joke", "limit": 5, "scan_limit": 50})
+        (10, {"query": "started ibiza joke", "limit": 5, "scan_limit": 500})
     ]
     assert "<retrieved_memory_snapshots>" in captured["prompt"]
     assert "Alice started the hotel joke" in captured["prompt"]
@@ -174,3 +174,77 @@ def test_all_filler_question_falls_back_to_recent_context():
     )
 
     assert retriever.calls[0][1].query == ""
+
+
+def test_memory_range_fetches_old_raw_support_outside_recent_scan():
+    recent_retriever = FakeRetriever(
+        RetrievalResult(
+            messages=[
+                {
+                    "msg_id": 900,
+                    "user_id": 20,
+                    "user_name": "Bob",
+                    "text": "recent Ibiza mention",
+                    "ts": 900,
+                }
+            ],
+            scanned_count=100,
+            truncated=True,
+        )
+    )
+
+    class SupportingStorage:
+        def search_memories(self, chat_id, **kwargs):
+            return [
+                {
+                    "start_ts": 10,
+                    "end_ts": 20,
+                    "created_at": 100,
+                    "summary": "Ibiza began here",
+                    "items": [],
+                }
+            ]
+
+        def message_page(
+            self,
+            chat_id,
+            *,
+            start_ts,
+            end_ts,
+            limit,
+            exclusive_start_key=None,
+        ):
+            assert chat_id == 10
+            assert (start_ts, end_ts) == (10, 20)
+            return [
+                {
+                    "msg_id": 11,
+                    "user_id": 10,
+                    "user_name": "Alice",
+                    "text": "Ibiza origin evidence",
+                    "ts": 11,
+                }
+            ], None
+
+    captured = {"calls": 0}
+
+    def backend(prompt):
+        captured["calls"] += 1
+        captured["prompt"] = prompt
+        return "Alice supplied the old evidence."
+
+    result = history_qa.ask_history(
+        10,
+        "What are the Ibiza origins?",
+        SupportingStorage(),
+        SETTINGS,
+        retriever=recent_retriever,
+        backend_fn=backend,
+    )
+
+    assert "Ibiza origin evidence" in captured["prompt"]
+    assert "recent Ibiza mention" in captured["prompt"]
+    assert captured["calls"] == 1
+    assert result["evidence_count"] == 2
+    assert result["retrieved_count"] == 2
+    assert result["scanned_count"] == 101

@@ -49,6 +49,7 @@ def answer_lore(
     elif command == "quotes":
         if argument:
             user = argument
+            query = argument
             question = f"Show the best evidence-backed memorable quotes from {argument}."
         else:
             question = "Show the best evidence-backed memorable quotes from the group."
@@ -72,7 +73,7 @@ def answer_lore(
         evidence_limit=30,
         scan_limit=500,
         memory_limit=8,
-        memory_scan_limit=50,
+        memory_scan_limit=500,
         query=query,
         user=user,
         start_ts=start_ts,

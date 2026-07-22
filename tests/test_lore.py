@@ -52,7 +52,7 @@ def test_quotes_filters_raw_history_by_user(monkeypatch):
     lore.answer_lore("quotes", "Alice", 7, object(), {}, now_fn=lambda: 1)
 
     assert captured["user"] == "Alice"
-    assert captured["query"] == ""
+    assert captured["query"] == "Alice"
 
 
 def test_inside_joke_requires_a_search_value():

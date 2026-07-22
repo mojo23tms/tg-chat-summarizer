@@ -32,7 +32,7 @@ legacy SQLite polling mode. It:
 - searches only the current `chat_id`;
 - caps returned evidence and scanned messages independently;
 - trims selected evidence to the configured LLM input-token budget;
-- retrieves up to five relevant snapshots from a bounded 50-memory scan;
+- retrieves up to five relevant snapshots from a bounded 500-memory scan;
 - budgets compact memories together with raw messages;
 - makes no provider call when both evidence sources are absent;
 - passes truncation context to the evidence-grounded ask prompt.
@@ -53,7 +53,7 @@ names/timestamps when useful, and admit ambiguity or weak support.
 - Every read is scoped to one `chat_id` partition.
 - `limit` controls returned evidence.
 - `scan_limit` independently caps evaluated messages.
-- Memory lookup is independently capped at five results from 50 recent
+- Memory lookup is independently capped at five results from 500
   snapshots.
 - DynamoDB pagination is followed only until the scan budget is exhausted.
 - Keyword matching currently favors simplicity over a secondary index. A query
@@ -70,6 +70,13 @@ Command handlers should not know whether context came from keyword search, memor
 - sending raw whole-history context to an LLM;
 - making Google Drive or NordLocker runtime dependencies;
 - adding embeddings before memory snapshots prove useful.
+
+Historical memory lookup paginates across the bounded snapshot scan and ranks
+deterministic lexical metadata. Empty lore queries sample snapshots across the
+available source timeline instead of selecting only the newest slice. After
+selecting a small memory set, retrieval fetches at most three raw supporting
+messages from each selected source range, with a 50-message scan cap per range.
+The final answer still uses one bounded LLM generation call.
 
 ## Friend-Chat Queries To Support
 

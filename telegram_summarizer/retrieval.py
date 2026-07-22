@@ -44,6 +44,25 @@ def _keyword_score(message, keywords):
 
 def rank_memory_snapshots(memories, query, limit):
     keywords = _keywords(query)
+    limit = int(limit)
+    if not keywords:
+        ordered = sorted(
+            memories,
+            key=lambda memory: (
+                int(memory.get("start_ts", 0)),
+                int(memory.get("end_ts", 0)),
+                int(memory.get("created_at", 0)),
+            ),
+        )
+        if len(ordered) <= limit:
+            return ordered
+        if limit == 1:
+            return [ordered[-1]]
+        indices = [
+            round(index * (len(ordered) - 1) / (limit - 1))
+            for index in range(limit)
+        ]
+        return [ordered[index] for index in indices]
     ranked = []
     for index, memory in enumerate(memories):
         search_text = json.dumps(memory, ensure_ascii=False, default=str).casefold()
@@ -57,7 +76,7 @@ def rank_memory_snapshots(memories, query, limit):
     return [
         memory
         for _score, _created_at, _index, memory in sorted(ranked, reverse=True)[
-            : int(limit)
+            : limit
         ]
     ]
 

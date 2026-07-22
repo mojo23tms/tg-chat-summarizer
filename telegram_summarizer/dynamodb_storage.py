@@ -44,6 +44,10 @@ def _memory_sk(start_ts, end_ts):
     return f"MEMORY#{int(start_ts):020d}#{int(end_ts):020d}"
 
 
+def _backfill_sk(job_name):
+    return f"BACKFILL#{str(job_name).upper()}"
+
+
 class DynamoDBStorage:
     def __init__(self, table_name=None, dynamodb_resource=None, ttl_days=None):
         if dynamodb_resource is None:
@@ -160,6 +164,53 @@ class DynamoDBStorage:
         ]
         return rows, response.get("LastEvaluatedKey")
 
+    def chronological_message_page(
+        self,
+        chat_id,
+        *,
+        start_ts=0,
+        end_ts=99_999_999_999,
+        limit=100,
+        exclusive_start_key=None,
+    ):
+        start_ts = int(start_ts)
+        end_ts = int(end_ts)
+        limit = int(limit)
+        if start_ts > end_ts:
+            return [], None
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        kwargs = {
+            "KeyConditionExpression": "pk = :pk AND sk BETWEEN :start AND :end",
+            "ExpressionAttributeValues": {
+                ":pk": _chat_pk(chat_id),
+                ":start": _message_range_start(start_ts),
+                ":end": _message_range_end(end_ts),
+            },
+            "ScanIndexForward": True,
+            "Limit": limit,
+        }
+        if exclusive_start_key is not None:
+            kwargs["ExclusiveStartKey"] = exclusive_start_key
+        response = self.table.query(**kwargs)
+        rows = [
+            {
+                "msg_id": int(item.get("msg_id", 0)),
+                "user_id": int(item.get("user_id", 0)),
+                "user_name": item.get("user_name", "unknown"),
+                "text": item.get("text", ""),
+                "ts": int(item.get("ts", 0)),
+            }
+            for item in response.get("Items", [])
+        ]
+        return rows, response.get("LastEvaluatedKey")
+
+    def message_cursor(self, chat_id, message):
+        return {
+            "pk": _chat_pk(chat_id),
+            "sk": _message_sk(message["ts"], message["msg_id"]),
+        }
+
     def save_memory_snapshot(self, chat_id, snapshot):
         item = {
             "pk": _chat_pk(chat_id),
@@ -175,26 +226,72 @@ class DynamoDBStorage:
         scan_limit = int(scan_limit)
         if limit < 1 or scan_limit < 1:
             raise ValueError("memory limits must be positive")
-        response = self.table.query(
-            KeyConditionExpression="pk = :pk AND begins_with(sk, :prefix)",
-            ExpressionAttributeValues={
-                ":pk": _chat_pk(chat_id),
-                ":prefix": "MEMORY#",
-            },
-            ScanIndexForward=False,
-            Limit=scan_limit,
-        )
         memories = []
-        for item in response.get("Items", []):
-            memory = dict(item)
-            memory.pop("pk", None)
-            memory.pop("sk", None)
-            if start_ts is not None and int(memory.get("end_ts", 0)) < int(start_ts):
-                continue
-            if end_ts is not None and int(memory.get("start_ts", 0)) > int(end_ts):
-                continue
-            memories.append(memory)
+        scanned = 0
+        cursor = None
+        while scanned < scan_limit:
+            response = self.table.query(
+                KeyConditionExpression="pk = :pk AND begins_with(sk, :prefix)",
+                ExpressionAttributeValues={
+                    ":pk": _chat_pk(chat_id),
+                    ":prefix": "MEMORY#",
+                },
+                ScanIndexForward=False,
+                Limit=min(100, scan_limit - scanned),
+                **({"ExclusiveStartKey": cursor} if cursor is not None else {}),
+            )
+            items = response.get("Items", [])
+            scanned += len(items)
+            for item in items:
+                memory = dict(item)
+                memory.pop("pk", None)
+                memory.pop("sk", None)
+                if start_ts is not None and int(memory.get("end_ts", 0)) < int(start_ts):
+                    continue
+                if end_ts is not None and int(memory.get("start_ts", 0)) > int(end_ts):
+                    continue
+                memories.append(memory)
+            cursor = response.get("LastEvaluatedKey")
+            if cursor is None or not items:
+                break
         return rank_memory_snapshots(memories, query, limit)
+
+    def get_backfill_checkpoint(self, chat_id, job_name="historical_memory"):
+        response = self.table.get_item(
+            Key={"pk": _chat_pk(chat_id), "sk": _backfill_sk(job_name)}
+        )
+        item = response.get("Item")
+        if not item:
+            return None
+        checkpoint = dict(item)
+        checkpoint.pop("pk", None)
+        checkpoint.pop("sk", None)
+        for key in (
+            "start_ts",
+            "end_ts",
+            "processed_messages",
+            "processed_chunks",
+            "updated_at",
+        ):
+            if key in checkpoint:
+                checkpoint[key] = int(checkpoint[key])
+        return checkpoint
+
+    def save_backfill_checkpoint(
+        self, chat_id, checkpoint, job_name="historical_memory"
+    ):
+        self.table.put_item(
+            Item={
+                "pk": _chat_pk(chat_id),
+                "sk": _backfill_sk(job_name),
+                **checkpoint,
+            }
+        )
+
+    def clear_backfill_checkpoint(self, chat_id, job_name="historical_memory"):
+        self.table.delete_item(
+            Key={"pk": _chat_pk(chat_id), "sk": _backfill_sk(job_name)}
+        )
 
     def get_settings(self, chat_id):
         settings = dict(config.DEFAULTS)

@@ -125,6 +125,8 @@ def _format_message_block(messages):
         text = str(message.get("text", ""))
         timestamp = message.get("ts")
         prefix = f"[{index}]"
+        if message.get("msg_id") is not None:
+            prefix += f" msg_id={message['msg_id']}"
         if timestamp is not None:
             prefix += f" ts={timestamp}"
         lines.append(f"{prefix} user={user_name}\n{text}")
@@ -234,7 +236,8 @@ def build_memory_prompt(messages, settings):
         'incident|quote|recurring_topic|people_lore|unresolved_story|'
         'roast_or_conflict|canon_event|other_lore","title":"short title",'
         '"details":"evidence-grounded explanation","people":["name"],'
-        '"keywords":["term"],"source_timestamps":[123]}]}\n'
+        '"keywords":["term"],"source_timestamps":[123],'
+        '"source_message_ids":[456]}]}\n'
         "Use an empty summary and empty items array when there is no durable memory. "
         "Return JSON only, with no Markdown fences.\n"
         f"{_language_instruction(settings.get('language', 'auto'))}\n\n"
@@ -668,14 +671,20 @@ def chat(question, settings, backend_fn=None):
     return chat_with_usage(question, settings, backend_fn=backend_fn)["text"]
 
 
-def memory_with_usage(messages, settings, backend_fn=None):
+def memory_with_usage(
+    messages, settings, backend_fn=None, max_output_tokens=None
+):
     if not messages:
         return _empty_result("Nothing to remember yet.", settings)
     return _generate_with_usage(
         build_memory_prompt(messages, settings),
         settings,
         backend_fn=backend_fn,
-        max_output_tokens=config.MEMORY_OUTPUT_TOKENS,
+        max_output_tokens=(
+            config.MEMORY_OUTPUT_TOKENS
+            if max_output_tokens is None
+            else int(max_output_tokens)
+        ),
     )
 
 

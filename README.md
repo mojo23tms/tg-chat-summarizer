@@ -31,6 +31,8 @@ development and rollback.
   maintenance, and rollback.
 - [History Import](docs/history-import.md): export Telegram history and import it
   into DynamoDB safely.
+- [Historical Memory Backfill](docs/historical-memory-backfill.md): build
+  resumable searchable memories from a large imported archive.
 
 ## Current Tech Stack
 
@@ -63,6 +65,7 @@ telegram_summarizer/
   dynamodb_storage.py   DynamoDB adapter
   handlers.py           legacy local/Fly long-polling handlers
   helpers.py            parsing, escaping, Telegram HTML sanitizer
+  historical_backfill.py resumable offline archive memory orchestration
   history_qa.py         shared bounded history Q&A orchestration
   llm.py                LLM prompting, provider adapters, usage metadata
   memory.py             structured low-cost memory generation
@@ -71,6 +74,7 @@ telegram_summarizer/
   telegram_api.py       small Telegram Bot API client
 
 scripts/
+  backfill_historical_memory.py build historical memory snapshots
   set_webhook.py            register Telegram webhook
   import_telegram_export.py import local/S3 Telegram Desktop JSON history
 

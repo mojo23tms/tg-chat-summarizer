@@ -4,6 +4,7 @@ from scripts import import_telegram_export as importer
 from telegram_summarizer.retrieval import (
     ChatHistoryRetriever,
     RetrievalRequest,
+    rank_memory_snapshots,
 )
 
 
@@ -104,6 +105,17 @@ def test_recent_retrieval_returns_latest_messages_in_chronological_order():
 
     assert [message["text"] for message in result.messages] == ["m3", "m4", "m5"]
     assert result.scanned_count == 3
+
+
+def test_empty_memory_query_samples_across_full_history_without_embeddings():
+    memories = [
+        {"start_ts": index * 10, "end_ts": index * 10 + 9, "created_at": index}
+        for index in range(10)
+    ]
+
+    selected = rank_memory_snapshots(memories, "", limit=4)
+
+    assert [memory["start_ts"] for memory in selected] == [0, 30, 60, 90]
 
 
 def test_s3_backfill_is_idempotent_bounded_and_retrievable():

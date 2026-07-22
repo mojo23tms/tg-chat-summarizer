@@ -86,6 +86,15 @@ Validates structured provider JSON, attaches source-range metadata, and stores
 bounded friend-chat memory snapshots without exposing provider details.
 
 ```text
+telegram_summarizer/historical_backfill.py
+scripts/backfill_historical_memory.py
+```
+
+Offline chronological archive processing with per-chat checkpoints, explicit
+token/cost guards, idempotent snapshot ranges, dry-run estimates, and safe
+failure resume. It reads DynamoDB only; S3 remains an earlier import source.
+
+```text
 telegram_summarizer/lore.py
 ```
 
@@ -252,9 +261,13 @@ sk = MEMORY#{start_timestamp_padded}#{end_timestamp_padded}
 ```
 
 Snapshots store version, creation/source timestamps, source message count, a
-compact summary, and structured lore items. Rebuilding the same source range
-overwrites it rather than creating a duplicate. Reads are bounded and scoped to
-one chat partition.
+compact summary, structured lore items, participants, lexical terms, and source
+message IDs. Rebuilding the same source range overwrites it rather than creating
+a duplicate. Reads are bounded and scoped to one chat partition.
+
+Historical progress uses `CHAT#{chat_id}` / `BACKFILL#HISTORICAL_MEMORY`. The
+opaque chronological cursor advances only after a successful chunk, so failures
+resume without gaps and completed jobs can later process newly arrived messages.
 
 ## Command Routing
 

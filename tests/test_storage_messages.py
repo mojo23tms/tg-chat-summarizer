@@ -40,6 +40,35 @@ def test_sqlite_message_pages_are_scoped_bounded_and_paginated():
     assert all(row["user_id"] == 10 for row in first + second)
 
 
+def test_sqlite_chronological_pages_and_checkpoint_resume():
+    conn = storage.connect(":memory:")
+    for ts in range(1, 6):
+        storage.log_message(conn, 1, ts, 10, "alice", f"m{ts}", ts)
+    storage.log_message(conn, 2, 99, 20, "other", "wrong chat", 3)
+    adapter = storage.SQLiteMessagePageStorage(conn)
+
+    first, cursor = adapter.chronological_message_page(1, limit=3)
+    second, final_cursor = adapter.chronological_message_page(
+        1, limit=3, exclusive_start_key=cursor
+    )
+    checkpoint = {
+        "status": "in_progress",
+        "start_ts": 0,
+        "end_ts": 100,
+        "cursor": cursor,
+        "processed_messages": 3,
+        "processed_chunks": 1,
+    }
+    adapter.save_backfill_checkpoint(1, checkpoint)
+
+    assert [row["text"] for row in first + second] == ["m1", "m2", "m3", "m4", "m5"]
+    assert final_cursor is None
+    assert adapter.get_backfill_checkpoint(1) == checkpoint
+    assert adapter.get_backfill_checkpoint(2) is None
+    adapter.clear_backfill_checkpoint(1)
+    assert adapter.get_backfill_checkpoint(1) is None
+
+
 def test_sqlite_memory_snapshots_are_idempotent_scoped_and_searchable():
     conn = storage.connect(":memory:")
     snapshot = {
