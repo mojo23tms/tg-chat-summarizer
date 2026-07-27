@@ -54,6 +54,7 @@ def test_manual_documents_lore_permissions_privacy_and_current_model():
     assert "compact <b>☰ Menu</b>" in manual
     assert "/insidejoke &lt;term&gt;" in manual
     assert "/recap [today|week|month|year|all]" in manual
+    assert "/usage [today|month|all]" in manual
     assert "admin-only" in manual
     assert "never sends the entire archive blindly" in manual
     assert "Current LLM: <code>groq:model-x</code>" in manual

@@ -37,6 +37,8 @@ development and rollback.
   resumable searchable memories from a large imported archive.
 - [Personal Cloud Archive](docs/product/cloud-archive.md): export readable and
   restore-compatible files for manual cloud backup.
+- [Final Roadmap Review](docs/codex/final-review.md): verification evidence,
+  architecture checklist, and residual risks.
 
 ## Current Tech Stack
 
@@ -195,9 +197,15 @@ GROQ_MODEL=llama-3.3-70b-versatile
        MessageTtlDays=365 \
        BotOwnerIds="" \
        MaxInputTokens=25000 \
+       AskOutputTokens=500 \
+       MemoryOutputTokens=1000 \
+       MemoryMaxMessages=500 \
        SummaryOutputTokens=1500 \
        SummaryMaxMessages=5000 \
-       LlmRequestTimeoutSeconds=45
+       LlmRequestTimeoutSeconds=45 \
+       GeminiDailyTokenQuota=0 \
+       GroqDailyTokenQuota=0 \
+       QuotaWarningRemainingPercent=10
    ```
 
 5. Register Telegram webhook:
@@ -237,9 +245,15 @@ GROQ_MODEL=llama-3.3-70b-versatile
        MessageTtlDays=365 \
        BotOwnerIds="YOUR_TELEGRAM_USER_ID" \
        MaxInputTokens=25000 \
+       AskOutputTokens=500 \
+       MemoryOutputTokens=1000 \
+       MemoryMaxMessages=500 \
        SummaryOutputTokens=1500 \
        SummaryMaxMessages=5000 \
-       LlmRequestTimeoutSeconds=45
+       LlmRequestTimeoutSeconds=45 \
+       GeminiDailyTokenQuota=0 \
+       GroqDailyTokenQuota=0 \
+       QuotaWarningRemainingPercent=10
    ```
 
 ## Daily Workflow
@@ -296,7 +310,7 @@ commands remain available as a fallback:
 /models                  list available LLM providers and starter models
 /setprovider gemini|groq set provider; admins or owner DM
 /setmodel <model|provider:model>
-/usage [today|month]      show token usage records
+/usage [today|month|all]  show token usage records
 /whoami                   show your user id and chat id
 /chats                    owner DM: list known chat ids
 /usechat <chat_id>        owner DM: select target chat

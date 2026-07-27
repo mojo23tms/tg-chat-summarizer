@@ -775,6 +775,15 @@ def test_usage_command_reports_totals():
     assert "total tokens: 1200" in telegram.sent[0]["text"]
 
 
+def test_usage_command_lists_all_supported_periods_on_invalid_input():
+    storage = FakeStorage()
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(update("/usage week"), storage, telegram)
+
+    assert telegram.sent[0]["text"] == "Usage: /usage [today|month|all]"
+
+
 def test_whoami_reports_user_and_chat_ids():
     storage = FakeStorage()
     telegram = FakeTelegram()

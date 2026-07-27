@@ -62,16 +62,18 @@ The checkpoint stores the opaque DynamoDB message cursor, source time bounds,
 status, cumulative processed message/chunk counts, selected provider/model, and
 update time. It advances only after a chunk has completed successfully.
 
-## Planned Item Families
+## Quota Warning Markers And Provider Settings
 
 Quota warnings:
 
 ```text
 pk = CHAT#{chat_id}
-sk = QUOTA_WARN#{provider}#{model}#{date}
+sk = QUOTA_WARN#{provider}#{date}
 ```
 
-Provider settings may live in the existing `SETTINGS` item if compatible.
+Quota markers are short-lived and prevent repeated low-quota warnings for the
+same chat/provider/day. Provider and model settings are attributes on the
+existing `SETTINGS` item.
 
 ## Rules
 

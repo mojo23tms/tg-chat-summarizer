@@ -82,7 +82,10 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy \
     MemoryMaxMessages=500 \
     SummaryOutputTokens=1500 \
     SummaryMaxMessages=5000 \
-    LlmRequestTimeoutSeconds=45
+    LlmRequestTimeoutSeconds=45 \
+    GeminiDailyTokenQuota=0 \
+    GroqDailyTokenQuota=0 \
+    QuotaWarningRemainingPercent=10
 ```
 
 If SAM rejects a `Name=` override, check that the parameter value is not empty.
@@ -152,7 +155,10 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy \
     MemoryMaxMessages=500 \
     SummaryOutputTokens=1500 \
     SummaryMaxMessages=5000 \
-    LlmRequestTimeoutSeconds=45
+    LlmRequestTimeoutSeconds=45 \
+    GeminiDailyTokenQuota=0 \
+    GroqDailyTokenQuota=0 \
+    QuotaWarningRemainingPercent=10
 ```
 
 Then in a DM with the bot:
@@ -178,6 +184,7 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam deploy --region eu-central-1
 After deploy, verify:
 
 ```text
+/menu
 /help
 /chat say hello in one short sentence
 /summarize
@@ -334,6 +341,17 @@ to `--writer aws-cli` for this reason. For SAM/AWS commands, verify:
 DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws sts get-caller-identity \
   --region eu-central-1
 ```
+
+If `aws login` returns HTTP 400 from its local browser callback, use an
+interactive terminal and the cross-device flow:
+
+```bash
+DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib aws login --remote
+```
+
+Keep that same terminal open, visit the displayed URL, and paste the resulting
+authorization code into its waiting prompt. A non-interactive shell will close
+stdin and fail with `EOF when reading a line`.
 
 ### Homebrew `pyexpat` Error
 

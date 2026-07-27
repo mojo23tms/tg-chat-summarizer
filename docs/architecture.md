@@ -106,8 +106,8 @@ Shared thin orchestration for `/lore`, `/insidejoke`, `/bestof`, `/quotes`, and
 telegram_summarizer/bot_menu.py
 ```
 
-Defines the shared full manual and persistent Telegram reply-keyboard layout
-used by AWS webhook mode and legacy local polling mode.
+Defines the shared full manual, one-row persistent launcher, and compact inline
+menu layouts used by AWS webhook mode and legacy local polling mode.
 
 ```text
 telegram_summarizer/llm.py

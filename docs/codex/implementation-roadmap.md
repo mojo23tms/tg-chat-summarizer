@@ -242,6 +242,9 @@ Requirements:
 
 ## Batch 14: Final Documentation and Review
 
+Status: implemented with synchronized product/operations/spec documentation,
+offline release-contract tests, and a recorded final review.
+
 Update docs for commands, providers, quotas, memory, cloud archive, cost control, privacy, and deployment.
 
 Final review checklist:

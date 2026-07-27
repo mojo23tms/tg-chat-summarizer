@@ -464,6 +464,16 @@ def test_help_handler_reports_current_commands_and_model():
     assert message.replies[0]["reply_markup"].is_persistent is True
 
 
+def test_local_usage_error_lists_all_supported_periods():
+    message = FakeMessage()
+    update = SimpleNamespace(effective_message=message)
+    context = SimpleNamespace(args=["week"])
+
+    asyncio.run(handlers.usage_handler(update, context))
+
+    assert message.replies[0]["text"] == "Usage: /usage [today|month|all]"
+
+
 def test_menu_handler_installs_one_row_launcher_and_inline_home():
     message = FakeMessage()
     update = SimpleNamespace(effective_message=message)

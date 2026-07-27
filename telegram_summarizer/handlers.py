@@ -436,7 +436,7 @@ async def settings_handler(update, context):
 async def usage_handler(update, context):
     period = (context.args[0] if context.args else "all").lower()
     if period not in {"today", "month", "all"}:
-        await update.effective_message.reply_text("Usage: /usage [today|month]")
+        await update.effective_message.reply_text("Usage: /usage [today|month|all]")
         return
     since_ts = None
     if period == "today":

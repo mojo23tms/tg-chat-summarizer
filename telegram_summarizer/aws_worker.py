@@ -829,7 +829,7 @@ def _handle_usage(storage, telegram, message, args, now_fn):
     chat_id = _chat_id(message)
     period = (args[0] if args else "all").lower()
     if period not in {"today", "month", "all"}:
-        telegram.send_message(chat_id, "Usage: /usage [today|month]")
+        telegram.send_message(chat_id, "Usage: /usage [today|month|all]")
         return
     telegram.send_message(chat_id, _usage_text(storage, message, period, now_fn))
 
