@@ -70,23 +70,11 @@ def _keyboard(rows):
 
 
 def _main_menu_markup(is_owner_dm=False):
-    rows = [
-        [_button("📝 Summarize", "menu:summarize"), _button("⚙️ Settings", "settings:view")],
-        [_button("📊 Usage", "usage:all"), _button("❓ Help", "menu:help")],
-    ]
-    if is_owner_dm:
-        rows.append([_button("💬 Chats", "owner:chats")])
-    return _keyboard(rows)
+    return bot_menu.inline_markup("home", is_owner_dm)
 
 
 def _summarize_menu_markup():
-    return _keyboard(
-        [
-            [_button("🕘 Last 30", "sum:30"), _button("📚 Last 100", "sum:100")],
-            [_button("🧾 Last 200", "sum:200"), _button("🎯 Auto", "sum:auto")],
-            [_button("⬅️ Back", "menu:home")],
-        ]
-    )
+    return bot_menu.inline_markup("summarize")
 
 
 def _settings_menu_markup():
@@ -115,16 +103,7 @@ def _settings_menu_markup():
 
 
 def _usage_menu_markup():
-    return _keyboard(
-        [
-            [
-                _button("📅 Today", "usage:today"),
-                _button("🗓️ Month", "usage:month"),
-                _button("♾️ All", "usage:all"),
-            ],
-            [_button("⬅️ Back", "menu:home")],
-        ]
-    )
+    return bot_menu.inline_markup("usage")
 
 
 def _owner_chats_markup(chat_ids):
@@ -169,9 +148,25 @@ def _render_home(storage, telegram, message, message_id=None):
     else:
         telegram.send_message(
             _chat_id(message),
-            text,
+            "Compact menu ready below.",
             reply_markup=bot_menu.reply_markup(is_owner_dm=_is_owner_dm(message)),
         )
+        _send_menu(
+            telegram,
+            _chat_id(message),
+            text,
+            _main_menu_markup(is_owner_dm=_is_owner_dm(message)),
+        )
+
+
+def _render_navigation_menu(telegram, message, menu, title, message_id=None):
+    _send_menu(
+        telegram,
+        _chat_id(message),
+        title,
+        bot_menu.inline_markup(menu),
+        message_id=message_id,
+    )
 
 
 def _render_summarize_menu(telegram, message, message_id=None):
@@ -910,7 +905,17 @@ def _apply_callback_setting(storage, telegram, message, key, value, message_id):
     _render_settings_menu(storage, telegram, message, message_id=message_id)
 
 
-def _handle_callback(update, storage, telegram, summarize_fn, now_fn):
+def _handle_callback(
+    update,
+    storage,
+    telegram,
+    summarize_fn,
+    chat_fn,
+    ask_fn,
+    remember_fn,
+    lore_fn,
+    now_fn,
+):
     callback_query = update.get("callback_query") or {}
     callback_id = callback_query.get("id")
     if callback_id:
@@ -923,10 +928,49 @@ def _handle_callback(update, storage, telegram, summarize_fn, now_fn):
 
     if data == "menu:home":
         _render_home(storage, telegram, message, message_id=message_id)
+    elif data == "menu:conversation":
+        _render_navigation_menu(
+            telegram, message, "conversation", "Conversation", message_id=message_id
+        )
     elif data == "menu:summarize":
         _render_summarize_menu(telegram, message, message_id=message_id)
+    elif data == "menu:lore":
+        _render_navigation_menu(
+            telegram, message, "lore", "Lore", message_id=message_id
+        )
+    elif data == "menu:usage":
+        _render_navigation_menu(
+            telegram, message, "usage", "Usage", message_id=message_id
+        )
     elif data == "menu:help":
         _render_help_menu(storage, telegram, message, message_id=message_id)
+    elif data.startswith("action:"):
+        command = data.split(":", 1)[1]
+        if command in {
+            "ask",
+            "chat",
+            "lore",
+            "insidejoke",
+            "bestof",
+            "quotes",
+            "recap",
+            "remember",
+            "models",
+            "whoami",
+        }:
+            action_message = dict(message)
+            action_message["text"] = f"/{command}"
+            process_update(
+                {"message": action_message},
+                storage,
+                telegram,
+                summarize_fn=summarize_fn,
+                chat_fn=chat_fn,
+                now_fn=now_fn,
+                ask_fn=ask_fn,
+                remember_fn=remember_fn,
+                lore_fn=lore_fn,
+            )
     elif data.startswith("sum:"):
         mode = data.split(":", 1)[1]
         args = ["auto"] if mode == "auto" else [mode]
@@ -1040,7 +1084,17 @@ def process_update(
 ):
     now_fn = now_fn or time.time
     if update.get("callback_query"):
-        _handle_callback(update, storage, telegram, summarize_fn, now_fn)
+        _handle_callback(
+            update,
+            storage,
+            telegram,
+            summarize_fn,
+            chat_fn,
+            ask_fn,
+            remember_fn,
+            lore_fn,
+            now_fn,
+        )
         return
 
     message = _message(update)

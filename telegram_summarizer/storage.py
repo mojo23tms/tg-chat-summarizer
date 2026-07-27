@@ -195,6 +195,9 @@ class SQLiteMessagePageStorage:
     def save_memory_snapshot(self, chat_id, snapshot):
         return save_memory_snapshot(self.conn, chat_id, snapshot)
 
+    def memory_page(self, chat_id, **kwargs):
+        return memory_page(self.conn, chat_id, **kwargs)
+
     def search_memories(
         self, chat_id, query="", limit=5, scan_limit=50, start_ts=None, end_ts=None
     ):
@@ -298,6 +301,55 @@ def search_memories(
     rows = conn.execute(sql, params).fetchall()
     memories = [json.loads(row["content_json"]) for row in rows]
     return rank_memory_snapshots(memories, query, limit)
+
+
+def memory_page(
+    conn,
+    chat_id,
+    *,
+    limit=100,
+    exclusive_start_key=None,
+):
+    limit = int(limit)
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    sql = (
+        "SELECT id, start_ts, end_ts, content_json FROM memory_snapshots "
+        "WHERE chat_id = ?"
+    )
+    params = [int(chat_id)]
+    if exclusive_start_key is not None:
+        cursor_start = int(exclusive_start_key["start_ts"])
+        cursor_end = int(exclusive_start_key["end_ts"])
+        cursor_id = int(exclusive_start_key["id"])
+        sql += (
+            " AND (start_ts > ? OR (start_ts = ? AND end_ts > ?) "
+            "OR (start_ts = ? AND end_ts = ? AND id > ?))"
+        )
+        params.extend(
+            [
+                cursor_start,
+                cursor_start,
+                cursor_end,
+                cursor_start,
+                cursor_end,
+                cursor_id,
+            ]
+        )
+    sql += " ORDER BY start_ts ASC, end_ts ASC, id ASC LIMIT ?"
+    params.append(limit + 1)
+    rows = conn.execute(sql, params).fetchall()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    memories = [json.loads(row["content_json"]) for row in page]
+    cursor = None
+    if has_more:
+        cursor = {
+            "start_ts": int(page[-1]["start_ts"]),
+            "end_ts": int(page[-1]["end_ts"]),
+            "id": int(page[-1]["id"]),
+        }
+    return memories, cursor
 
 
 def get_backfill_checkpoint(conn, chat_id, job_name="historical_memory"):

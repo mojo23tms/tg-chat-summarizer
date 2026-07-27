@@ -224,6 +224,53 @@ def test_memory_search_paginates_beyond_newest_hundred_snapshots():
     assert rows[0]["start_ts"] == 0
 
 
+def test_memory_pages_are_chronological_paginated_and_chat_scoped():
+    storage, _table = adapter()
+    for index in range(5):
+        storage.save_memory_snapshot(
+            1,
+            {
+                "version": 1,
+                "created_at": index,
+                "start_ts": index * 10,
+                "end_ts": index * 10 + 9,
+                "message_count": 2,
+                "summary": f"chunk {index}",
+                "items": [],
+            },
+        )
+    storage.save_memory_snapshot(
+        2,
+        {
+            "version": 1,
+            "created_at": 99,
+            "start_ts": 0,
+            "end_ts": 9,
+            "message_count": 1,
+            "summary": "wrong chat",
+            "items": [],
+        },
+    )
+
+    first, cursor = storage.memory_page(1, limit=2)
+    second, next_cursor = storage.memory_page(
+        1, limit=2, exclusive_start_key=cursor
+    )
+    third, final_cursor = storage.memory_page(
+        1, limit=2, exclusive_start_key=next_cursor
+    )
+
+    assert [item["summary"] for item in first + second + third] == [
+        "chunk 0",
+        "chunk 1",
+        "chunk 2",
+        "chunk 3",
+        "chunk 4",
+    ]
+    assert final_cursor is None
+    assert all("pk" not in item and "sk" not in item for item in first + second)
+
+
 def test_backfill_checkpoint_is_chat_scoped_and_clearable():
     storage, _table = adapter()
     checkpoint = {

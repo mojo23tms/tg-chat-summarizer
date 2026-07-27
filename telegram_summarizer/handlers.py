@@ -1,9 +1,15 @@
 import logging
 import time
 
-from telegram import ReplyKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 from . import bot_menu
 from . import config
@@ -28,6 +34,15 @@ def _menu_markup():
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Choose what the bot should do",
+    )
+
+
+def _inline_menu_markup(menu="home"):
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(**button) for button in row]
+            for row in bot_menu.inline_rows(menu)
+        ]
     )
 
 
@@ -451,7 +466,12 @@ async def whoami_handler(update, context):
 
 
 async def menu_handler(update, context):
-    await update.effective_message.reply_text("Menu", reply_markup=_menu_markup())
+    await update.effective_message.reply_text(
+        "Compact menu ready below.", reply_markup=_menu_markup()
+    )
+    await update.effective_message.reply_text(
+        "Menu", reply_markup=_inline_menu_markup()
+    )
 
 
 async def help_handler(update, context):
@@ -481,6 +501,46 @@ MENU_HANDLERS = {
 }
 
 
+async def menu_callback_handler(update, context):
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    navigation = {
+        "menu:home": ("home", "Menu"),
+        "menu:conversation": ("conversation", "Conversation"),
+        "menu:summarize": ("summarize", "Summaries"),
+        "menu:lore": ("lore", "Lore"),
+        "menu:usage": ("usage", "Usage"),
+    }
+    if data in navigation:
+        menu, title = navigation[data]
+        await query.edit_message_text(title, reply_markup=_inline_menu_markup(menu))
+        return
+    if data == "menu:help":
+        context.args = []
+        await help_handler(update, context)
+        return
+    if data == "settings:view":
+        context.args = []
+        await settings_handler(update, context)
+        return
+    if data.startswith("sum:"):
+        value = data.split(":", 1)[1]
+        context.args = ["auto" if value == "auto" else value]
+        await summarize_handler(update, context)
+        return
+    if data.startswith("usage:"):
+        context.args = [data.split(":", 1)[1]]
+        await usage_handler(update, context)
+        return
+    if data.startswith("action:"):
+        command = data.split(":", 1)[1]
+        handler = MENU_HANDLERS.get(command)
+        if handler is not None:
+            context.args = []
+            await handler(update, context)
+
+
 async def text_handler(update, context):
     text = update.effective_message.text
     command = bot_menu.BUTTON_COMMANDS.get(text)
@@ -503,6 +563,12 @@ def build_application(conn, data_dir):
     app = Application.builder().token(config.TELEGRAM_TOKEN).build()
     app.bot_data["conn"] = conn
     app.bot_data["data_dir"] = data_dir
+    app.add_handler(
+        CallbackQueryHandler(
+            menu_callback_handler,
+            pattern=r"^(menu:|sum:|usage:|settings:view$|action:)",
+        )
+    )
     app.add_handler(CommandHandler("menu", menu_handler))
     app.add_handler(CommandHandler("ask", ask_handler))
     app.add_handler(CommandHandler("remember", remember_handler))

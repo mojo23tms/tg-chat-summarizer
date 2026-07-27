@@ -219,6 +219,36 @@ class DynamoDBStorage:
         }
         self.table.put_item(Item=item)
 
+    def memory_page(
+        self,
+        chat_id,
+        *,
+        limit=100,
+        exclusive_start_key=None,
+    ):
+        limit = int(limit)
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        kwargs = {
+            "KeyConditionExpression": "pk = :pk AND begins_with(sk, :prefix)",
+            "ExpressionAttributeValues": {
+                ":pk": _chat_pk(chat_id),
+                ":prefix": "MEMORY#",
+            },
+            "ScanIndexForward": True,
+            "Limit": limit,
+        }
+        if exclusive_start_key is not None:
+            kwargs["ExclusiveStartKey"] = exclusive_start_key
+        response = self.table.query(**kwargs)
+        memories = []
+        for item in response.get("Items", []):
+            memory = dict(item)
+            memory.pop("pk", None)
+            memory.pop("sk", None)
+            memories.append(memory)
+        return memories, response.get("LastEvaluatedKey")
+
     def search_memories(
         self, chat_id, query="", limit=5, scan_limit=50, start_ts=None, end_ts=None
     ):

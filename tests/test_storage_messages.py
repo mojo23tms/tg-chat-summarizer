@@ -109,3 +109,45 @@ def test_sqlite_memory_snapshots_are_idempotent_scoped_and_searchable():
             conn, 1, "ibiza", start_ts=15, end_ts=30, limit=5, scan_limit=10
         )
     ) == 1
+
+
+def test_sqlite_memory_pages_are_chronological_paginated_and_scoped():
+    conn = storage.connect(":memory:")
+    adapter = storage.SQLiteMessagePageStorage(conn)
+    for index in (3, 1, 2):
+        adapter.save_memory_snapshot(
+            1,
+            {
+                "version": 1,
+                "created_at": index,
+                "start_ts": index * 10,
+                "end_ts": index * 10 + 9,
+                "message_count": 1,
+                "summary": f"chunk {index}",
+                "items": [],
+            },
+        )
+    adapter.save_memory_snapshot(
+        2,
+        {
+            "version": 1,
+            "created_at": 1,
+            "start_ts": 10,
+            "end_ts": 19,
+            "message_count": 1,
+            "summary": "wrong chat",
+            "items": [],
+        },
+    )
+
+    first, cursor = adapter.memory_page(1, limit=2)
+    second, final_cursor = adapter.memory_page(
+        1, limit=2, exclusive_start_key=cursor
+    )
+
+    assert [item["summary"] for item in first + second] == [
+        "chunk 1",
+        "chunk 2",
+        "chunk 3",
+    ]
+    assert final_cursor is None

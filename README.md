@@ -20,6 +20,8 @@ development and rollback.
 - Lets configured bot owners manage group settings from direct messages.
 - Imports Telegram Desktop JSON history from a local file or offline S3 source
   into DynamoDB.
+- Exports a portable local archive for manual Google Drive, NordLocker, or S3
+  backup without adding cloud storage to the live bot path.
 - Provides bounded chat-scoped retrieval primitives for future history-aware
   commands.
 
@@ -33,6 +35,8 @@ development and rollback.
   into DynamoDB safely.
 - [Historical Memory Backfill](docs/historical-memory-backfill.md): build
   resumable searchable memories from a large imported archive.
+- [Personal Cloud Archive](docs/product/cloud-archive.md): export readable and
+  restore-compatible files for manual cloud backup.
 
 ## Current Tech Stack
 
@@ -61,6 +65,7 @@ development and rollback.
 telegram_summarizer/
   aws_webhook.py        API Gateway webhook Lambda
   aws_worker.py         SQS worker Lambda and command routing
+  archive_export.py     provider-neutral offline personal archive writer
   config.py             environment-driven configuration
   dynamodb_storage.py   DynamoDB adapter
   handlers.py           legacy local/Fly long-polling handlers
@@ -75,6 +80,7 @@ telegram_summarizer/
 
 scripts/
   backfill_historical_memory.py build historical memory snapshots
+  export_personal_archive.py export local Drive/NordLocker/S3-ready package
   set_webhook.py            register Telegram webhook
   import_telegram_export.py import local/S3 Telegram Desktop JSON history
 
@@ -264,13 +270,15 @@ DYLD_LIBRARY_PATH=/usr/local/opt/expat/lib sam logs \
 
 ## Bot Menu And Commands
 
-`/start`, `/help`, and `/menu` install a persistent reply keyboard below the
-Telegram text field. Commands that need free text ask for it in the next
-message. The older AWS inline settings callbacks remain compatible. Slash
+`/start`, `/help`, and `/menu` install a compact, one-row `☰ Menu` launcher
+below the Telegram text field. Tapping it opens small inline submenus for
+conversation, summaries, lore, settings, usage, and diagnostics. Commands that
+need free text ask for it in the next message. Previously installed button
+labels and the older AWS inline settings callbacks remain compatible. Slash
 commands remain available as a fallback:
 
 ```text
-/menu                    show or restore the persistent button menu
+/menu                    show or restore the compact launcher and inline menu
 /ask <question>          answer from bounded current-chat history evidence
 /remember [N|auto]       admin: store compact lore, max 500 source messages
 /chat <question>         ask a general question; does not search chat history

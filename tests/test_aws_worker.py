@@ -790,20 +790,20 @@ def test_whoami_reports_user_and_chat_ids():
     ]
 
 
-def test_menu_command_sends_persistent_reply_keyboard():
+def test_menu_command_sends_compact_launcher_and_inline_home():
     storage = FakeStorage()
     telegram = FakeTelegram()
 
     aws_worker.process_update(update("/menu"), storage, telegram)
 
     assert telegram.sent[0]["chat_id"] == 10
-    assert telegram.sent[0]["text"].startswith("Menu")
-    markup = telegram.sent[0]["reply_markup"]
-    assert markup["keyboard"][0] == [
-        {"text": "📝 Summarize"},
-        {"text": "🧠 Ask history"},
-    ]
-    assert markup["is_persistent"] is True
+    assert telegram.sent[0]["reply_markup"]["keyboard"] == [[{"text": "☰ Menu"}]]
+    assert telegram.sent[0]["reply_markup"]["is_persistent"] is True
+    assert telegram.sent[1]["text"].startswith("Menu")
+    assert telegram.sent[1]["reply_markup"]["inline_keyboard"][0][0] == {
+        "text": "💬 Conversation",
+        "callback_data": "menu:conversation",
+    }
 
 
 def test_callback_query_home_edits_menu_and_answers_spinner():
@@ -815,9 +815,36 @@ def test_callback_query_home_edits_menu_and_answers_spinner():
     assert telegram.sent[0]["method"] == "answer_callback_query"
     assert telegram.sent[1]["method"] == "edit"
     assert telegram.sent[1]["message_id"] == 99
-    assert telegram.sent[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == (
-        "menu:summarize"
+    assert (
+        telegram.sent[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+        == "menu:conversation"
     )
+
+
+def test_inline_conversation_menu_prompts_for_ask_input():
+    storage = FakeStorage()
+    telegram = FakeTelegram()
+
+    aws_worker.process_update(callback("menu:conversation"), storage, telegram)
+    aws_worker.process_update(
+        callback("action:ask"), storage, telegram, now_fn=lambda: 100
+    )
+
+    assert telegram.sent[1]["reply_markup"]["inline_keyboard"][0][0] == {
+        "text": "🧠 Ask history",
+        "callback_data": "action:ask",
+    }
+    assert storage.pending[42]["action"] == "run_ask"
+    assert telegram.sent[-1]["text"] == "Send your chat-history question as your next message."
+
+
+def test_inline_remember_action_preserves_admin_permission_check():
+    storage = FakeStorage()
+    telegram = FakeTelegram(status="member")
+
+    aws_worker.process_update(callback("action:remember"), storage, telegram)
+
+    assert telegram.sent[-1]["text"] == "Only admins can build memory snapshots."
 
 
 def test_help_command_reports_actual_commands_and_current_model():
@@ -833,7 +860,7 @@ def test_help_command_reports_actual_commands_and_current_model():
     assert "/setprovider gemini|groq" in telegram.sent[0]["text"]
     assert "Current LLM: <code>groq:m1</code>" in telegram.sent[0]["text"]
     assert telegram.sent[0]["parse_mode"] == ParseMode.HTML
-    assert telegram.sent[0]["reply_markup"]["keyboard"][5][0]["text"] == "📊 Usage"
+    assert telegram.sent[0]["reply_markup"]["keyboard"] == [[{"text": "☰ Menu"}]]
 
 
 def test_lore_command_uses_shared_handler_and_logs_usage():

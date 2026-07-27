@@ -208,13 +208,39 @@ Acceptance criteria:
 
 ## Batch 12: Personal Cloud Archive
 
+Status: implemented as a provider-neutral offline export package with manual
+Google Drive, NordLocker, and S3 upload workflows.
+
 Evaluate and implement only useful archival integration.
 
 Google Drive is for readable archives, digests, JSON exports, and manual browsing/search. NordLocker is for optional encrypted backup or manual export workflow. S3 may be used as an AWS-side raw history archive or disaster-recovery source, but runtime commands should consume DynamoDB copies produced by offline import/backfill jobs.
 
 Cloud storage must never be in the live Telegram request path.
 
-## Batch 13: Final Documentation and Review
+## Batch 13: Compact Telegram Menu
+
+Status: implemented with a one-row persistent launcher and shared compact
+inline navigation for AWS webhook and legacy local polling modes.
+
+Make the persistent reply keyboard below the text field comfortable on a phone.
+It currently exposes every available action and occupies too much vertical
+screen space.
+
+Requirements:
+
+- reduce the persistent reply keyboard to a minimal launcher that uses no more
+  than one compact row;
+- keep the complete action set discoverable through the existing inline menu
+  and slash commands;
+- organize inline actions into clear, small submenus instead of presenting one
+  oversized panel;
+- preserve admin-only controls and owner-DM chat selection rules;
+- keep AWS webhook mode and legacy local polling mode consistent;
+- update the help text so navigation remains obvious;
+- add focused offline tests for keyboard size, action reachability, permissions,
+  callback navigation, and both runtime modes.
+
+## Batch 14: Final Documentation and Review
 
 Update docs for commands, providers, quotas, memory, cloud archive, cost control, privacy, and deployment.
 

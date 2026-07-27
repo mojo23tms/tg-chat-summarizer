@@ -319,10 +319,13 @@ Lore commands reuse `/ask`'s safe output and evidence rules. Period commands
 apply timestamp bounds before retrieval; `/quotes` applies a user-name filter;
 all lore scans are capped below the general `/ask` ceiling.
 
-`/menu`, `/help`, and `/start` attach a persistent reply keyboard below the
-Telegram input field. Free-text buttons store one short-lived pending action and
-consume only that user's next message in the same chat. Slash commands remain
-compatible, and old AWS inline callbacks still work.
+`/menu`, `/help`, and `/start` attach a one-row persistent `☰ Menu` launcher
+below the Telegram input field. The launcher opens compact inline submenus for
+the complete action set. Free-text actions store one short-lived pending action
+and consume only that user's next message in the same chat. AWS webhook and
+legacy local polling modes share the menu layout, slash commands remain
+compatible, and labels from previously installed reply keyboards still route to
+their original commands.
 
 `/chat` continues to avoid history reads.
 
@@ -343,6 +346,24 @@ Live retrieval:
 
 S3 is never called by the webhook or worker Lambda. It is an offline backfill
 source only, and the SAM template intentionally grants no S3 runtime access.
+
+## Personal Cloud Archive Export
+
+`scripts/export_personal_archive.py` is an offline operator command. It reads
+one chat partition from DynamoDB through bounded chronological message and
+memory pages, then atomically creates a local directory containing:
+
+- `result.json`, compatible with the existing Telegram export importer;
+- `chat-history.md`, a readable escaped transcript;
+- `memory-snapshots.json` and `memory-snapshots.md`;
+- `manifest.json`, with record counts, time bounds, byte sizes, and SHA-256
+  checksums.
+
+The exporter makes no LLM calls and has no Google Drive or NordLocker SDK. The
+operator manually uploads selected files to Google Drive, the complete folder
+to NordLocker, or copies it to S3 with the AWS CLI. The webhook and worker do
+not import the archive module, and the SAM template grants no personal-cloud or
+S3 archive permissions.
 
 Settings commands:
 

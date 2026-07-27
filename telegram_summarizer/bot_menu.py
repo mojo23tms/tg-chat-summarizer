@@ -5,6 +5,7 @@ from . import llm
 
 
 BUTTON_COMMANDS = {
+    "☰ Menu": "menu",
     "📝 Summarize": "summarize",
     "🧠 Ask history": "ask",
     "💬 Chat": "chat",
@@ -22,22 +23,57 @@ BUTTON_COMMANDS = {
     "💬 Chats": "chats",
 }
 
-MENU_ROWS = [
-    ["📝 Summarize", "🧠 Ask history"],
-    ["💬 Chat", "📚 Lore"],
-    ["😂 Inside joke", "🏆 Best of"],
-    ["💬 Quotes", "🗓 Recap"],
-    ["🧠 Remember", "⚙️ Settings"],
-    ["📊 Usage", "🤖 Models"],
-    ["❓ Help", "🆔 Who am I"],
-]
+MENU_ROWS = [["☰ Menu"]]
+
+INLINE_MENUS = {
+    "home": [
+        [("💬 Conversation", "menu:conversation"), ("📝 Summaries", "menu:summarize")],
+        [("📚 Lore", "menu:lore"), ("⚙️ Settings", "settings:view")],
+        [("📊 Usage", "menu:usage"), ("🤖 Models", "action:models")],
+        [("❓ Help", "menu:help"), ("🆔 Who am I", "action:whoami")],
+    ],
+    "conversation": [
+        [("🧠 Ask history", "action:ask"), ("💬 Chat", "action:chat")],
+        [("⬅️ Back", "menu:home")],
+    ],
+    "summarize": [
+        [("🕘 Last 30", "sum:30"), ("📚 Last 100", "sum:100")],
+        [("🧾 Last 200", "sum:200"), ("🎯 Auto", "sum:auto")],
+        [("⬅️ Back", "menu:home")],
+    ],
+    "lore": [
+        [("📚 Lore", "action:lore"), ("😂 Inside joke", "action:insidejoke")],
+        [("🏆 Best of", "action:bestof"), ("💬 Quotes", "action:quotes")],
+        [("🗓 Recap", "action:recap"), ("🧠 Remember", "action:remember")],
+        [("⬅️ Back", "menu:home")],
+    ],
+    "usage": [
+        [
+            ("📅 Today", "usage:today"),
+            ("🗓️ Month", "usage:month"),
+            ("♾️ All", "usage:all"),
+        ],
+        [("⬅️ Back", "menu:home")],
+    ],
+}
 
 
 def rows(is_owner_dm=False):
-    result = [list(row) for row in MENU_ROWS]
-    if is_owner_dm:
-        result.append(["💬 Chats"])
+    return [list(row) for row in MENU_ROWS]
+
+
+def inline_rows(menu="home", is_owner_dm=False):
+    result = [
+        [{"text": text, "callback_data": callback_data} for text, callback_data in row]
+        for row in INLINE_MENUS[menu]
+    ]
+    if menu == "home" and is_owner_dm:
+        result.append([{"text": "💬 Chats", "callback_data": "owner:chats"}])
     return result
+
+
+def inline_markup(menu="home", is_owner_dm=False):
+    return {"inline_keyboard": inline_rows(menu, is_owner_dm)}
 
 
 def reply_markup(is_owner_dm=False):
@@ -54,10 +90,10 @@ def manual(settings, *, active_chat_id=None):
     active = f"Active chat: {active_chat_id}\n" if active_chat_id is not None else ""
     return (
         "<b>Bot manual</b>\n"
-        f"{active}Use the persistent buttons below the text field, or the matching "
-        "slash commands.\n\n"
+        f"{active}Tap the compact <b>☰ Menu</b> button below the text field to open "
+        "all actions, or use the matching slash commands.\n\n"
         "<b>Navigation</b>\n"
-        "• <code>/menu</code> — show or restore the persistent button menu.\n"
+        "• <code>/menu</code> — show or restore the compact launcher and inline menu.\n"
         "• <code>/help</code> — open this manual.\n\n"
         "<b>Conversation</b>\n"
         "• <code>/chat &lt;question&gt;</code> — general assistant; never searches history.\n"

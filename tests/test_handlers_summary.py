@@ -26,6 +26,19 @@ class FakeBot:
         return SimpleNamespace(status=self.status)
 
 
+class FakeCallbackQuery:
+    def __init__(self, data):
+        self.data = data
+        self.answered = False
+        self.edits = []
+
+    async def answer(self):
+        self.answered = True
+
+    async def edit_message_text(self, text, reply_markup=None):
+        self.edits.append({"text": text, "reply_markup": reply_markup})
+
+
 def test_summary_reply_escapes_llm_text_for_html_parse_mode(monkeypatch):
     conn = storage.connect(":memory:")
     storage.log_message(conn, 1, 1, 10, "alice", "hello", 100)
@@ -449,3 +462,64 @@ def test_help_handler_reports_current_commands_and_model():
     assert "Current LLM: <code>groq:llama-test</code>" in message.replies[0]["text"]
     assert message.replies[0]["parse_mode"] == ParseMode.HTML
     assert message.replies[0]["reply_markup"].is_persistent is True
+
+
+def test_menu_handler_installs_one_row_launcher_and_inline_home():
+    message = FakeMessage()
+    update = SimpleNamespace(effective_message=message)
+
+    asyncio.run(handlers.menu_handler(update, SimpleNamespace()))
+
+    launcher = message.replies[0]["reply_markup"]
+    assert len(launcher.keyboard) == 1
+    assert [button.text for button in launcher.keyboard[0]] == ["☰ Menu"]
+    inline = message.replies[1]["reply_markup"]
+    assert inline.inline_keyboard[0][0].callback_data == "menu:conversation"
+
+
+def test_local_inline_conversation_action_uses_existing_pending_input_flow():
+    conn = storage.connect(":memory:")
+    message = FakeMessage()
+    query = FakeCallbackQuery("action:ask")
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_chat=SimpleNamespace(id=1),
+        effective_user=SimpleNamespace(id=42, full_name="Bob"),
+        effective_message=message,
+    )
+    context = SimpleNamespace(bot_data={"conn": conn}, args=[], bot=FakeBot())
+
+    asyncio.run(handlers.menu_callback_handler(update, context))
+
+    assert query.answered is True
+    assert context.bot_data["pending_commands"][(1, 42)] == "ask"
+    assert message.replies[-1]["text"] == (
+        "Send your chat-history question as your next message."
+    )
+
+
+def test_local_inline_navigation_and_admin_permissions():
+    conn = storage.connect(":memory:")
+    message = FakeMessage()
+    query = FakeCallbackQuery("menu:lore")
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_chat=SimpleNamespace(id=1),
+        effective_user=SimpleNamespace(id=42, full_name="Bob"),
+        effective_message=message,
+    )
+    context = SimpleNamespace(
+        bot_data={"conn": conn}, args=[], bot=FakeBot(status="member")
+    )
+
+    asyncio.run(handlers.menu_callback_handler(update, context))
+
+    assert query.edits[0]["text"] == "Lore"
+    assert query.edits[0]["reply_markup"].inline_keyboard[0][0].callback_data == (
+        "action:lore"
+    )
+
+    query.data = "action:remember"
+    asyncio.run(handlers.menu_callback_handler(update, context))
+
+    assert message.replies[-1]["text"] == "Only admins can build memory snapshots."
